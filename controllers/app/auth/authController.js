@@ -5,6 +5,8 @@ const { sendOtpCode } = require('../../../utils/sms');
 const { verifyRefreshToken, hashToken } = require('../../../utils/jwt');
 const { createSession } = require('../../../utils/session');
 const { sanitizeAccount } = require('../../../utils/sanitize');
+const { getSubscriptionStatus } = require('../../../utils/subscriptions');
+const { formatStatus } = require('../subscriptions/subscriptionController');
 
 const PHONE_REGEX = /^\+224[0-9]{8,9}$/;
 const OTP_TTL_MINUTES = 10;
@@ -145,7 +147,9 @@ exports.getMe = async (req, res) => {
     include: { defaultArea: true },
   });
 
-  return res.status(200).json({ success: true, data: sanitizeAccount(account) });
+  const subscription = formatStatus(await getSubscriptionStatus(account.id));
+
+  return res.status(200).json({ success: true, data: { ...sanitizeAccount(account), subscription } });
 };
 
 // PUT /app/auth/me

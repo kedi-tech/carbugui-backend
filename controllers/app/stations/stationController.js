@@ -1,5 +1,6 @@
 const prisma = require('../../../utils/prisma');
 const { distanceMeters, boundingBox } = require('../../../utils/geo');
+const { PRODUCTS, isValidProduct } = require('../../../utils/products');
 
 // GET /app/stations/nearby?latitude&longitude&radius&product
 exports.getNearbyStations = async (req, res) => {
@@ -10,6 +11,10 @@ exports.getNearbyStations = async (req, res) => {
 
   if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
     return res.status(400).json({ success: false, message: 'latitude et longitude sont requis.' });
+  }
+
+  if (product && !isValidProduct(product)) {
+    return res.status(400).json({ success: false, message: `Produit invalide. Valeurs acceptées : ${PRODUCTS.join(', ')}.` });
   }
 
   const box = boundingBox(latitude, longitude, radiusKm);
@@ -41,7 +46,7 @@ exports.getNearbyStations = async (req, res) => {
         longitude,
         radiusKm,
         resultCount: results.length,
-        availableCount: results.filter((s) => s.products.some((p) => p.availability === 'AVAILABLE')).length,
+        availableCount: results.filter((s) => s.products.some((p) => p.availability === 'AVAILABLE' && (!product || p.product === product))).length,
       },
     }).catch((error) => console.error('SearchEvent tracking failed:', error.message));
   }
@@ -85,6 +90,10 @@ exports.createReport = async (req, res) => {
 
   if (!kind) {
     return res.status(400).json({ success: false, message: 'kind est requis.' });
+  }
+
+  if (product && !isValidProduct(product)) {
+    return res.status(400).json({ success: false, message: `Produit invalide. Valeurs acceptées : ${PRODUCTS.join(', ')}.` });
   }
 
   const station = await prisma.station.findUnique({ where: { id: req.params.id } });

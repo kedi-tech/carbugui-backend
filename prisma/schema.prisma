@@ -45,6 +45,10 @@ enum StationMemberRole {
 enum FuelProduct {
   ESSENCE
   GASOIL
+  /// Gaz butane (bouteilles). priceGnf = prix de la bouteille.
+  GAZ
+  /// Huiles moteur / lubrifiants. priceGnf = prix indicatif.
+  LUBRIFIANT
 }
 
 
@@ -105,6 +109,19 @@ enum DevicePlatform {
   IOS
   ANDROID
   WEB
+}
+
+/// Lifecycle of one Djomy payment-link checkout (see utils/djomy.js).
+enum PaymentStatus {
+  /// Link generated, waiting for the driver to pay.
+  PENDING
+  /// Djomy confirmed SUCCESS — a Subscription row was created for it.
+  SUCCEEDED
+  FAILED
+  /// The payer canceled on the Djomy portal.
+  CANCELED
+  /// The link expired without any successful payment.
+  EXPIRED
 }
 
 enum AdminMessageRecipientStatus {
@@ -176,6 +193,8 @@ model Account {
   activities            StationActivity[]
   sentAdminMessages     AdminMessage[]          @relation("AdminMessageSender")
   receivedAdminMessages AdminMessageRecipient[] @relation("AdminMessageRecipientAccount")
+  subscriptions         Subscription[]
+  payments              Payment[]
 
   @@index([role, status])
   @@index([defaultAreaId])
@@ -533,4 +552,110 @@ model AdminMessageRecipient {
   @@index([messageId])
   @@index([accountId, status])
   @@map("admin_message_recipients")
+}
+
+// ---------------------------------------------------------------------------
+// Abonnements & paiements (Djomy)
+// ---------------------------------------------------------------------------
+
+/// A subscription offer ("24 heures", "1 mois"). Seeded by prisma/seed.js;
+/// the price is editable by an admin without a deploy.
+model Plan {
+  id            String  @id @default(cuid())
+  /// Stable key used by the API and the frontend: "DAY", "MONTH".
+  code          String  @unique
+  label         String
+  priceGnf      Int
+  /// Access granted by one purchase (24 for DAY, 720 for MONTH).
+  durationHours Int
+  isActive      Boolean @default(true)
+  sortOrder     Int     @default(0)
+
+  subscriptions Subscription[]
+  payments      Payment[]
+
+  @@map("plans")
+}
+
+/// One paid access period. A purchase made while a period is still running
+/// starts when that period ends, so buying early never loses paid time. An
+/// account "is subscribed" when a row covers now (startsAt <= now < endsAt).
+model Subscription {
+  id        String @id @default(cuid())
+  accountId String
+  planId    String
+  /// The payment that bought this period — unique, so a replayed webhook
+  /// can never grant the same period twice.
+  paymentId String @unique
+
+  startsAt  DateTime
+  endsAt    DateTime
+  createdAt DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  plan    Plan    @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, endsAt])
+  @@map("subscriptions")
+}
+
+/// One Djomy payment-link checkout. Created PENDING when the link is
+/// generated, then settled by the webhook (or by the reconciliation poller
+/// if the webhook never arrives). Money fields are copied from Djomy once
+/// the payment is confirmed through GET /v1/payments/{id}/status.
+model Payment {
+  id        String        @id @default(cuid())
+  accountId String
+  planId    String
+  amountGnf Int
+  status    PaymentStatus @default(PENDING)
+
+  /// Our reference sent to Djomy (merchantReference) and echoed back as
+  /// merchantPaymentReference in the webhook — the primary lookup key.
+  merchantReference    String    @unique
+  paymentLinkReference String?   @unique
+  paymentUrl           String?   @db.Text
+  linkExpiresAt        DateTime?
+
+  /// Filled once Djomy reports a transaction for this link.
+  transactionId     String? @unique
+  paymentMethod     String?
+  payerIdentifier   String?
+  paidAmount        Int?
+  receivedAmount    Int?
+  fees              Int?
+  providerReference String?
+  failureReason     String?
+
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscription Subscription?
+
+  @@index([accountId, createdAt])
+  @@index([status, createdAt])
+  @@map("payments")
+}
+
+/// Raw log of every webhook call received, for audit and debugging. Never
+/// trusted on its own: the payment status is always re-read from the Djomy
+/// API before anything is granted.
+model WebhookEvent {
+  id             String    @id @default(cuid())
+  provider       String
+  eventId        String?
+  eventType      String?
+  signatureValid Boolean   @default(false)
+  payload        Json
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
+  error          String?   @db.Text
+
+  @@index([provider, eventId])
+  @@index([receivedAt])
+  @@map("webhook_events")
 }

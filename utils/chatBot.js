@@ -10,9 +10,14 @@ const INTENTS = [
     reply: 'Bonjour ! Je suis l\'assistant Carbugui. Posez-moi votre question sur les stations, les prix ou votre abonnement.',
   },
   {
+    id: 'subscription',
+    keywords: ['abonnement', 'abonner', 'paiement', 'payer', 'tarif'],
+    reply: 'Deux abonnements sont proposés : 24 heures ou 1 mois. Les tarifs et le paiement (Orange Money, MTN MoMo, carte) sont dans l\'onglet Abonnement de l\'application.',
+  },
+  {
     id: 'availability',
-    keywords: ['disponib', 'essence', 'gasoil', 'carburant', 'station'],
-    reply: 'Vous pouvez voir la disponibilité en temps réel de chaque produit (essence, gasoil) directement sur la carte de l\'application.',
+    keywords: ['disponib', 'essence', 'gasoil', 'gaz', 'lubrifiant', 'huile', 'carburant', 'station'],
+    reply: 'Vous pouvez voir la disponibilité en temps réel de chaque produit (essence, gasoil, gaz, lubrifiant) directement sur la carte de l\'application.',
   },
   {
     id: 'thanks',

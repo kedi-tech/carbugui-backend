@@ -1,0 +1,32 @@
+{
+  "source": "contexts/Book1.xlsx (Sheet1, colonnes Sites / Lat / Lng)",
+  "brand": {
+    "slug": "total",
+    "name": "TOTAL"
+  },
+  "notes": [
+    "Coordonnées en degrés décimaux (WGS84), copiées telles quelles depuis le fichier.",
+    "Siguiri Ville était en degrés-minutes-secondes (11°25'23.82 / 9°9'35.13\") : converti en 11.4232833 / -9.1597583 (la Guinée est à l'ouest de Greenwich, d'où la longitude négative).",
+    "'Nongo dem,' : virgule finale du fichier supprimée.",
+    "city déduite de la position : Conakry pour les 14 premiers sites, Dubréka et Siguiri pour les deux derniers.",
+    "Tous les sites appartiennent au réseau Total : ils sont rattachés à la marque TOTAL (slug total), créée si absente."
+  ],
+  "sites": [
+    { "name": "Coleah", "latitude": 9.52950669, "longitude": -13.6806564, "city": "Conakry" },
+    { "name": "Bellevue", "latitude": 9.5581507, "longitude": -13.6655665, "city": "Conakry" },
+    { "name": "Minière", "latitude": 9.563472, "longitude": -13.66189, "city": "Conakry" },
+    { "name": "Ratoma centre", "latitude": 9.583333, "longitude": -13.65, "city": "Conakry" },
+    { "name": "Aéroport A&G", "latitude": 9.57322, "longitude": -13.625078, "city": "Conakry" },
+    { "name": "Kaporo", "latitude": 9.612105, "longitude": -13.645967, "city": "Conakry" },
+    { "name": "Nongo dem", "latitude": 9.629928, "longitude": -13.629986, "city": "Conakry" },
+    { "name": "Lambanyi", "latitude": 9.6433478, "longitude": -13.6111704, "city": "Conakry" },
+    { "name": "Tanerie Corniche", "latitude": 9.6021675, "longitude": -13.6025763, "city": "Conakry" },
+    { "name": "Enta", "latitude": 9.6433366, "longitude": -13.563652, "city": "Conakry" },
+    { "name": "Tombolia A&G", "latitude": 9.650429, "longitude": -13.5496203, "city": "Conakry" },
+    { "name": "Tombolia Entrée", "latitude": 9.653611, "longitude": -13.546902, "city": "Conakry" },
+    { "name": "Dabompa Tamisso", "latitude": 9.6411855, "longitude": -13.5784012, "city": "Conakry" },
+    { "name": "Cimenterie", "latitude": 9.67985, "longitude": -13.538205, "city": "Conakry" },
+    { "name": "Kabelen Dubreka", "latitude": 10.071771, "longitude": -13.4511768, "city": "Dubréka" },
+    { "name": "Siguiri Ville", "latitude": 11.4232833, "longitude": -9.1597583, "city": "Siguiri" }
+  ]
+}

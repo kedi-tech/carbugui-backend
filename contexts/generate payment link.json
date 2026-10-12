@@ -1,0 +1,235 @@
+{
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "e0356ce7-a1af-410c-9c55-2589edc50b8a",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          -920,
+          -320
+        ],
+        "id": "f65e5fff-61a1-42df-9dfd-2c5dc5f5f8ce",
+        "name": "generate link",
+        "webhookId": "e0356ce7-a1af-410c-9c55-2589edc50b8a"
+      },
+      {
+        "parameters": {
+          "options": {}
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.4,
+        "position": [
+          180,
+          -320
+        ],
+        "id": "12ed8466-052e-4e80-bff7-dc968d73e195",
+        "name": "Respond to Webhook"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://sandbox-api.djomy.africa/v1/auth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-API-KEY",
+                "value": "djomy-client-1764855123774-2fb:58a9f1f5d967b556b9154d60d3e75ed027c4bbd25064af5ba38e16010f43dd79"
+              }
+            ]
+          },
+          "options": {
+            "redirect": {
+              "redirect": {}
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -260,
+          -320
+        ],
+        "id": "e8cc856b-6e22-4611-9c82-59ee60c83f49",
+        "name": "Auth fo token"
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://sandbox-api.djomy.africa/v1/links",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "X-API-KEY",
+                "value": "djomy-client-1764855123774-2fb:58a9f1f5d967b556b9154d60d3e75ed027c4bbd25064af5ba38e16010f43dd79"
+              },
+              {
+                "name": "Authorization",
+                "value": "=Bearer {{ $json.data.accessToken }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"amountToPay\":{{ $('generate link').item.json.body.amountToPay }},\n  \"linkName\": \"{{ $('Code').item.json.order_id }}\",\n  \"phoneNumber\": \"{{ $('generate link').item.json.body.phone }}\",\n  \"description\": \"{{ $('generate link').item.json.body.description }}\",\n  \"countryCode\": \"GN\",\n  \"usageType\": \"UNIQUE\",\n  \"expiresAt\": \"{{ $('Code').item.json.date_plus_15_minutes }}\",\n  \"merchantReference\": \"{{ $('generate link').item.json.body.merchantReference }}\",\n  \"usageLimit\": 1,\n  \"returnUrl\": \"https://mounagroup.com\",\n  \"cancelUrl\": \"https://mounagroup.com\",\n  \"metadata\": {\n    \"order_id\":\"{{ $('Code').item.json.order_id }}\",\n    \"hydra_customer_id\":{{ $('generate link').item.json.body.hydra_customer_id }},\n    \"phone\": \"{{ $('generate link').item.json.body.phone }}\",\n    \"type\":\"{{ $('generate link').item.json.body.type }}\",\n    \"startDate\":\"{{ $('generate link').item.json.body.startDate }}\",\n    \"endDate\":\"{{ $('generate link').item.json.body.endDate }}\",\n    \"flux\":\"{{ $('generate link').item.json.body.flux }}\"\n  }\n}",
+          "options": {
+            "redirect": {
+              "redirect": {}
+            }
+          }
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          -40,
+          -320
+        ],
+        "id": "e559fda1-80d1-4d75-8063-a280d27827c4",
+        "name": "Generate link"
+      },
+      {
+        "parameters": {
+          "jsCode": "// Timestamp pour order_id\nconst timestamp = Date.now();\n\n// Date actuelle\nconst now = new Date();\n\n// Date actuelle + 15 minutes\nconst plus15Minutes = new Date(now.getTime() + 15 * 60 * 1000);\n\nreturn [\n  {\n    order_id: String(timestamp),\n    current_date: now.toISOString(),\n    date_plus_15_minutes: plus15Minutes.toISOString(),\n  },\n];\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -700,
+          -320
+        ],
+        "id": "82315c31-3973-45e4-a8d6-867a1a469377",
+        "name": "Code"
+      },
+      {
+        "parameters": {
+          "table": {
+            "__rl": true,
+            "value": "Transaction",
+            "mode": "list",
+            "cachedResultName": "Transaction"
+          },
+          "dataMode": "defineBelow",
+          "valuesToSend": {
+            "values": [
+              {
+                "column": "order_id",
+                "value": "={{ $json.order_id }}"
+              },
+              {
+                "column": "status",
+                "value": "INITIATED"
+              },
+              {
+                "column": "amount",
+                "value": "={{ $('generate link').item.json.body.amountToPay }}"
+              },
+              {
+                "column": "phone",
+                "value": "={{ $('generate link').item.json.body.phone }}"
+              },
+              {
+                "column": "abonnement",
+                "value": "={{ $('generate link').item.json.body.merchantReference }}"
+              },
+              {
+                "column": "flux",
+                "value": "djomy"
+              },
+              {
+                "column": "createdAt",
+                "value": "={{ $now }}"
+              },
+              {
+                "column": "updatedAt",
+                "value": "={{ $now }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.mySql",
+        "typeVersion": 2.4,
+        "position": [
+          -480,
+          -320
+        ],
+        "id": "c1d9dd2a-56a6-4564-9ee2-1f9d28e36527",
+        "name": "creation de la transaction",
+        "credentials": {
+          "mySql": {
+            "id": "27e7DUQpapKDjEnw",
+            "name": "mouna_callback (85)"
+          }
+        },
+        "disabled": true
+      }
+    ],
+    "connections": {
+      "generate link": {
+        "main": [
+          [
+            {
+              "node": "Code",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Auth fo token": {
+        "main": [
+          [
+            {
+              "node": "Generate link",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Generate link": {
+        "main": [
+          [
+            {
+              "node": "Respond to Webhook",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code": {
+        "main": [
+          [
+            {
+              "node": "creation de la transaction",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "creation de la transaction": {
+        "main": [
+          [
+            {
+              "node": "Auth fo token",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "pinData": {},
+    "meta": {
+      "templateCredsSetupCompleted": true,
+      "instanceId": "a0f06c4c568931d87b44826ed9f39fb7fd5571bbd04d79538626254a201ed9c3"
+    }
+  }

@@ -12,6 +12,7 @@ dotenv.config();
 const prisma = require('./utils/prisma');
 const { matchIntent } = require('./utils/chatBot');
 const { dispatchDueScheduledMessages } = require('./utils/adminMessaging');
+const { reconcilePendingPayments } = require('./utils/subscriptions');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const openapiSpec = require('./docs/openapi');
 
@@ -19,6 +20,10 @@ const openapiSpec = require('./docs/openapi');
 const appAuthRoutes = require('./routes/app/auth/auth');
 const appStationRoutes = require('./routes/app/stations/station');
 const appChatRoutes = require('./routes/app/chat/chat');
+const appSubscriptionRoutes = require('./routes/app/subscriptions/subscriptions');
+
+// Webhooks entrants (prestataires de paiement)
+const djomyWebhookRoutes = require('./routes/webhooks/djomy');
 
 // Station routes (dashboard station-service)
 const stationAuthRoutes = require('./routes/station/auth/auth');
@@ -32,9 +37,12 @@ const adminCatalogRoutes = require('./routes/admin/catalog/catalog');
 const adminReportRoutes = require('./routes/admin/reports/reports');
 const adminChatRoutes = require('./routes/admin/chat/chat');
 const adminMessageRoutes = require('./routes/admin/messages/messages');
+const adminSubscriptionRoutes = require('./routes/admin/subscriptions/subscriptions');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const apiVersion = process.env.API_VERSION || 'v1';
+const apiPrefix = `/api/${apiVersion}`;
 
 app.use(cors());
 
@@ -48,9 +56,21 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Le corps brut est conservé pour vérifier la signature HMAC des webhooks
+// Djomy (X-Webhook-Signature), calculée sur les octets exacts reçus.
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  },
+}));
+
+// Monté avant le rate limiter : un rappel Djomy rejeté en 429 laisserait un
+// paiement réussi sans abonnement.
+app.use(`${apiPrefix}/webhooks`, djomyWebhookRoutes);
+
 app.use('/api/', limiter);
 
-app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -161,12 +181,10 @@ wss.on('connection', (ws) => {
   });
 });
 
-const apiVersion = process.env.API_VERSION || 'v1';
-const apiPrefix = `/api/${apiVersion}`;
-
 app.use(`${apiPrefix}/app/auth`, appAuthRoutes);
 app.use(`${apiPrefix}/app/stations`, appStationRoutes);
 app.use(`${apiPrefix}/app/chat`, appChatRoutes);
+app.use(`${apiPrefix}/app/subscriptions`, appSubscriptionRoutes);
 
 app.use(`${apiPrefix}/station/auth`, stationAuthRoutes);
 app.use(`${apiPrefix}/station/dashboard`, stationDashboardRoutes);
@@ -178,6 +196,7 @@ app.use(`${apiPrefix}/admin/catalog`, adminCatalogRoutes);
 app.use(`${apiPrefix}/admin/reports`, adminReportRoutes);
 app.use(`${apiPrefix}/admin/chat`, adminChatRoutes);
 app.use(`${apiPrefix}/admin/messages`, adminMessageRoutes);
+app.use(`${apiPrefix}/admin/subscriptions`, adminSubscriptionRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -192,6 +211,12 @@ server.listen(PORT, () => {
 // and messages scheduled for the future) — see utils/adminMessaging.js.
 setInterval(() => {
   dispatchDueScheduledMessages().catch((error) => console.error('dispatchDueScheduledMessages error:', error));
+}, 60 * 1000);
+
+// Rattrape les paiements Djomy restés PENDING (webhook perdu ou en retard)
+// et expire les liens jamais payés — voir utils/subscriptions.js.
+setInterval(() => {
+  reconcilePendingPayments().catch((error) => console.error('reconcilePendingPayments error:', error));
 }, 60 * 1000);
 
 process.on('SIGTERM', () => {

@@ -10,11 +10,28 @@ const AREAS = [
   { slug: 'matoto', label: 'Matoto', latitude: 9.6284, longitude: -13.5794, sortOrder: 5 },
 ];
 
+// Formules d'abonnement chauffeur. L'upsert ne touche qu'à durationHours et
+// sortOrder : un prix modifié par un admin (PUT /admin/subscriptions/plans)
+// n'est jamais écrasé par un nouveau seed.
+const PLANS = [
+  { code: 'DAY', label: '24 heures', priceGnf: 2000, durationHours: 24, sortOrder: 0 },
+  { code: 'MONTH', label: '1 mois', priceGnf: 10000, durationHours: 720, sortOrder: 1 },
+];
+
 async function main() {
   for (const area of AREAS) {
     await prisma.area.upsert({ where: { slug: area.slug }, update: area, create: area });
   }
   console.log(`✅ ${AREAS.length} zones (areas) synchronisées.`);
+
+  for (const plan of PLANS) {
+    await prisma.plan.upsert({
+      where: { code: plan.code },
+      update: { durationHours: plan.durationHours, sortOrder: plan.sortOrder },
+      create: plan,
+    });
+  }
+  console.log(`✅ ${PLANS.length} formules d'abonnement synchronisées.`);
 
   const adminPhone = process.env.SEED_ADMIN_PHONE || '+224610000000';
   const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'Admin@Carbugui2026';

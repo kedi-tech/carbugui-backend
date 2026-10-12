@@ -5,6 +5,8 @@
  * sur /api-docs. Toute nouvelle route doit être ajoutée ici.
  */
 
+const PRODUCT_ENUM = ['ESSENCE', 'GASOIL', 'GAZ', 'LUBRIFIANT'];
+
 const servers = [
   { url: 'http://localhost:5000/api/v1', description: 'Local' },
 ];
@@ -67,7 +69,7 @@ const schemas = {
     properties: {
       id: { type: 'string' },
       stationId: { type: 'string' },
-      product: { type: 'string', enum: ['ESSENCE', 'GASOIL'] },
+      product: { type: 'string', enum: PRODUCT_ENUM },
       availability: { type: 'string', enum: ['AVAILABLE', 'EMPTY'] },
       priceGnf: { type: 'integer', nullable: true, example: 15000 },
       updatedAt: { type: 'string', format: 'date-time' },
@@ -84,7 +86,7 @@ const schemas = {
       tone: { type: 'string', enum: ['AVAILABLE', 'EMPTY', 'OPEN', 'CLOSED'] },
       label: { type: 'string', example: 'Essence' },
       detail: { type: 'string', example: 'Marqué disponible' },
-      product: { type: 'string', enum: ['ESSENCE', 'GASOIL'], nullable: true },
+      product: { type: 'string', enum: PRODUCT_ENUM, nullable: true },
       availability: { type: 'string', enum: ['AVAILABLE', 'EMPTY'], nullable: true },
       isOpen: { type: 'boolean', nullable: true },
       createdAt: { type: 'string', format: 'date-time' },
@@ -100,7 +102,7 @@ const schemas = {
         type: 'string',
         enum: ['WRONG_AVAILABILITY', 'WRONG_OPEN_STATE', 'WRONG_LOCATION', 'CLOSED_PERMANENTLY', 'OTHER'],
       },
-      product: { type: 'string', enum: ['ESSENCE', 'GASOIL'], nullable: true },
+      product: { type: 'string', enum: PRODUCT_ENUM, nullable: true },
       comment: { type: 'string', nullable: true },
       status: { type: 'string', enum: ['PENDING', 'ACCEPTED', 'REJECTED'] },
       resolvedAt: { type: 'string', format: 'date-time', nullable: true },
@@ -177,6 +179,64 @@ const schemas = {
     properties: {
       success: { type: 'boolean', example: false },
       message: { type: 'string' },
+    },
+  },
+  Plan: {
+    type: 'object',
+    properties: {
+      code: { type: 'string', enum: ['DAY', 'MONTH'], example: 'DAY' },
+      label: { type: 'string', example: '24 heures' },
+      priceGnf: { type: 'integer', example: 2000 },
+      durationHours: { type: 'integer', example: 24, description: '24 (DAY) ou 720 (MONTH, 30 jours).' },
+    },
+  },
+  SubscriptionStatus: {
+    type: 'object',
+    properties: {
+      required: { type: 'boolean', description: "false si le serveur tourne avec SUBSCRIPTION_REQUIRED=false (stations accessibles sans abonnement)." },
+      active: { type: 'boolean', description: 'true si une période payée couvre maintenant.' },
+      accessUntil: {
+        type: 'string', format: 'date-time', nullable: true,
+        description: "Fin de l'accès, périodes achetées d'avance incluses (elles s'enchaînent). null si inactif.",
+      },
+      current: {
+        type: 'object',
+        nullable: true,
+        properties: {
+          id: { type: 'string' },
+          planCode: { type: 'string', enum: ['DAY', 'MONTH'] },
+          planLabel: { type: 'string' },
+          startsAt: { type: 'string', format: 'date-time' },
+          endsAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      upcomingCount: { type: 'integer', description: 'Nombre de périodes déjà payées qui démarreront après la période en cours.' },
+    },
+  },
+  Payment: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      status: {
+        type: 'string',
+        enum: ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'EXPIRED'],
+        description: 'PENDING : lien généré, en attente du paiement. SUCCEEDED : payé et abonnement activé.',
+      },
+      amountGnf: { type: 'integer', example: 10000 },
+      merchantReference: { type: 'string', example: 'SUB-M2X7K9QF-3A1C', description: 'Référence à communiquer au support.' },
+      paymentUrl: { type: 'string', nullable: true, example: 'https://sandbox.djomy.africa/p/32f4AS77', description: 'Page de paiement Djomy à ouvrir (navigateur / WebView).' },
+      linkExpiresAt: { type: 'string', format: 'date-time', nullable: true, description: 'Le lien expire 15 min après sa création.' },
+      paymentMethod: { type: 'string', nullable: true, example: 'OM', description: 'OM, MOMO, KULU, CARD… une fois payé.' },
+      paidAt: { type: 'string', format: 'date-time', nullable: true },
+      failureReason: { type: 'string', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' },
+      plan: { type: 'object', nullable: true, properties: { code: { type: 'string' }, label: { type: 'string' } } },
+      subscription: {
+        type: 'object',
+        nullable: true,
+        description: 'Période accordée par ce paiement (SUCCEEDED uniquement).',
+        properties: { startsAt: { type: 'string', format: 'date-time' }, endsAt: { type: 'string', format: 'date-time' } },
+      },
     },
   },
   AdminMessageRecipient: {
@@ -262,6 +322,21 @@ const responses = {
   Conflict: {
     description: 'Conflit avec une ressource existante.',
     content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+  },
+  SubscriptionRequired: {
+    description: "Chauffeur sans abonnement actif. `code` vaut toujours 'SUBSCRIPTION_REQUIRED' : ouvrir l'écran d'abonnement.",
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean', example: false },
+            code: { type: 'string', example: 'SUBSCRIPTION_REQUIRED' },
+            message: { type: 'string' },
+          },
+        },
+      },
+    },
   },
   TooManyRequests: {
     description: 'Trop de tentatives — réessayer plus tard.',
@@ -398,8 +473,17 @@ const paths = {
     get: {
       tags: ['App · Auth'],
       summary: 'Mon profil chauffeur',
+      description: "Inclut `subscription` (même contenu que GET /app/subscriptions/me).",
       security: bearer,
-      responses: { 200: ok({ $ref: '#/components/schemas/Account' }), 401: responses.Unauthorized },
+      responses: {
+        200: ok({
+          allOf: [
+            { $ref: '#/components/schemas/Account' },
+            { type: 'object', properties: { subscription: { $ref: '#/components/schemas/SubscriptionStatus' } } },
+          ],
+        }),
+        401: responses.Unauthorized,
+      },
     },
     put: {
       tags: ['App · Auth'],
@@ -545,30 +629,44 @@ const paths = {
     get: {
       tags: ['App · Stations'],
       summary: 'Lister les stations publiées',
-      responses: { 200: okList({ $ref: '#/components/schemas/Station' }) },
+      description: "Réservé aux chauffeurs abonnés (Bearer requis, 402 SUBSCRIPTION_REQUIRED sinon). Les comptes STATION/ADMIN ne sont pas concernés. Public si le serveur tourne avec SUBSCRIPTION_REQUIRED=false.",
+      security: bearer,
+      responses: { 200: okList({ $ref: '#/components/schemas/Station' }), 401: responses.Unauthorized, 402: responses.SubscriptionRequired },
     },
   },
   '/app/stations/nearby': {
     get: {
       tags: ['App · Stations'],
       summary: 'Rechercher les stations à proximité',
-      description: "Journalise un SearchEvent si l'appelant est authentifié (Authorization optionnel).",
-      security: [{}, ...bearer],
+      description: "Réservé aux chauffeurs abonnés (Bearer requis, 402 SUBSCRIPTION_REQUIRED sinon). Les comptes STATION/ADMIN ne sont pas concernés. Public si le serveur tourne avec SUBSCRIPTION_REQUIRED=false. Journalise un SearchEvent pour l'appelant authentifié. `product` filtre les stations qui vendent ce produit.",
+      security: bearer,
       parameters: [
         { name: 'latitude', in: 'query', required: true, schema: { type: 'number' } },
         { name: 'longitude', in: 'query', required: true, schema: { type: 'number' } },
         { name: 'radius', in: 'query', schema: { type: 'number', default: 5 }, description: 'Rayon en km.' },
-        { name: 'product', in: 'query', schema: { type: 'string', enum: ['ESSENCE', 'GASOIL'] } },
+        { name: 'product', in: 'query', schema: { type: 'string', enum: PRODUCT_ENUM } },
       ],
-      responses: { 200: okList({ $ref: '#/components/schemas/Station' }), 400: responses.BadRequest },
+      responses: {
+        200: okList({ $ref: '#/components/schemas/Station' }),
+        400: responses.BadRequest,
+        401: responses.Unauthorized,
+        402: responses.SubscriptionRequired,
+      },
     },
   },
   '/app/stations/{id}': {
     get: {
       tags: ['App · Stations'],
       summary: "Détail d'une station",
+      description: "Réservé aux chauffeurs abonnés (Bearer requis, 402 SUBSCRIPTION_REQUIRED sinon). Les comptes STATION/ADMIN ne sont pas concernés. Public si le serveur tourne avec SUBSCRIPTION_REQUIRED=false.",
+      security: bearer,
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-      responses: { 200: ok({ $ref: '#/components/schemas/Station' }), 404: responses.NotFound },
+      responses: {
+        200: ok({ $ref: '#/components/schemas/Station' }),
+        401: responses.Unauthorized,
+        402: responses.SubscriptionRequired,
+        404: responses.NotFound,
+      },
     },
   },
   '/app/stations/{id}/reports': {
@@ -589,7 +687,7 @@ const paths = {
                   type: 'string',
                   enum: ['WRONG_AVAILABILITY', 'WRONG_OPEN_STATE', 'WRONG_LOCATION', 'CLOSED_PERMANENTLY', 'OTHER'],
                 },
-                product: { type: 'string', enum: ['ESSENCE', 'GASOIL'] },
+                product: { type: 'string', enum: PRODUCT_ENUM },
                 comment: { type: 'string' },
               },
             },
@@ -597,6 +695,135 @@ const paths = {
         },
       },
       responses: { 201: ok({ $ref: '#/components/schemas/StationReport' }), 400: responses.BadRequest, 404: responses.NotFound },
+    },
+  },
+
+  // ===== App — Abonnements ==========================================
+  '/app/subscriptions/plans': {
+    get: {
+      tags: ['App · Abonnements'],
+      summary: 'Formules disponibles (24 heures, 1 mois)',
+      description: 'Public. Toujours afficher les prix renvoyés ici : ils sont modifiables par un admin.',
+      security: [],
+      responses: { 200: okList({ $ref: '#/components/schemas/Plan' }) },
+    },
+  },
+  '/app/subscriptions/me': {
+    get: {
+      tags: ['App · Abonnements'],
+      summary: "Mon état d'abonnement",
+      security: bearer,
+      responses: { 200: ok({ $ref: '#/components/schemas/SubscriptionStatus' }), 401: responses.Unauthorized, 403: responses.Forbidden },
+    },
+  },
+  '/app/subscriptions/checkout': {
+    post: {
+      tags: ['App · Abonnements'],
+      summary: 'Démarrer un paiement (génère le lien de paiement Djomy)',
+      description:
+        "Crée un paiement PENDING et un lien Djomy à usage unique valable 15 minutes. Ouvrir `data.paymentUrl` " +
+        "(navigateur / WebView) : le chauffeur paie par Orange Money, MTN MoMo, carte… Ensuite interroger " +
+        "GET /app/subscriptions/payments/{id} jusqu'à un statut final. Si un lien encore valide existe déjà pour la " +
+        "même formule, il est renvoyé (`reused: true`, HTTP 200) au lieu d'en créer un nouveau. Acheter pendant une " +
+        "période active la prolonge (la nouvelle période commence à la fin de la précédente).",
+      security: bearer,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['planCode'],
+              properties: { planCode: { type: 'string', enum: ['DAY', 'MONTH'] } },
+            },
+          },
+        },
+      },
+      responses: {
+        201: {
+          description: 'Lien de paiement créé.',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  reused: { type: 'boolean' },
+                  data: { $ref: '#/components/schemas/Payment' },
+                },
+              },
+            },
+          },
+        },
+        200: { description: 'Lien encore valide réutilisé (reused: true), même format que 201.' },
+        400: responses.BadRequest,
+        401: responses.Unauthorized,
+        404: responses.NotFound,
+        502: { description: 'Djomy a refusé ou n\'a pas répondu (le paiement est marqué FAILED).' },
+        503: { description: 'Paiement non configuré côté serveur (clés Djomy absentes).' },
+      },
+    },
+  },
+  '/app/subscriptions/payments': {
+    get: {
+      tags: ['App · Abonnements'],
+      summary: 'Historique de mes paiements (50 derniers)',
+      security: bearer,
+      responses: { 200: okList({ $ref: '#/components/schemas/Payment' }), 401: responses.Unauthorized },
+    },
+  },
+  '/app/subscriptions/payments/{id}': {
+    get: {
+      tags: ['App · Abonnements'],
+      summary: "Statut d'un paiement (à interroger après la page Djomy)",
+      description:
+        "Si le paiement est encore PENDING, le serveur revérifie en direct auprès de Djomy avant de répondre. " +
+        "Interroger toutes les 3 à 5 s au retour de la page de paiement, jusqu'à SUCCEEDED, FAILED, CANCELED ou EXPIRED.",
+      security: bearer,
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: { 200: ok({ $ref: '#/components/schemas/Payment' }), 401: responses.Unauthorized, 404: responses.NotFound },
+    },
+  },
+
+  // ===== Webhooks ===================================================
+  '/webhooks/djomy': {
+    post: {
+      tags: ['Webhooks'],
+      summary: 'Callback Djomy (changement de statut de paiement)',
+      description:
+        "Appelé par Djomy uniquement, pas par le frontend. URL à déclarer dans l'espace développeur Djomy. " +
+        "Accepte les formats V1 (`data`) et V2 (`data.payment`). Signature `X-Webhook-Signature: v1:<hmac>` vérifiée ; " +
+        "le statut est toujours reconfirmé via l'API Djomy avant d'activer un abonnement. Non soumis au rate limit.",
+      security: [],
+      parameters: [{ name: 'X-Webhook-Signature', in: 'header', schema: { type: 'string', example: 'v1:3f1a…' } }],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: { type: 'object' },
+            example: {
+              eventType: 'payment.success',
+              data: {
+                transactionId: '1d0de2c2-39e5-43fd-a464-f31feef97bef',
+                status: 'SUCCESS',
+                paidAmount: 10000,
+                receivedAmount: 9875,
+                fees: 125,
+                paymentMethod: 'OM',
+                payerIdentifier: '00224621999616',
+                merchantPaymentReference: 'SUB-M2X7K9QF-3A1C',
+                currency: 'GNF',
+              },
+              paymentLinkReference: 'VUG6FKh9',
+              metadata: { type: 'subscription', paymentId: 'cm…', planCode: 'MONTH' },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: 'Traité (ou ignoré : paiement inconnu, événement payout).' },
+        401: { description: 'Signature invalide (uniquement si DJOMY_WEBHOOK_REQUIRE_SIGNATURE=true).' },
+        500: { description: 'Djomy injoignable pour la vérification — Djomy rejouera.' },
+      },
     },
   },
 
@@ -820,7 +1047,7 @@ const paths = {
       security: bearer,
       parameters: [
         { name: 'stationId', in: 'path', required: true, schema: { type: 'string' } },
-        { name: 'product', in: 'path', required: true, schema: { type: 'string', enum: ['ESSENCE', 'GASOIL'] } },
+        { name: 'product', in: 'path', required: true, schema: { type: 'string', enum: PRODUCT_ENUM } },
       ],
       requestBody: {
         content: {
@@ -1228,6 +1455,70 @@ const paths = {
     },
   },
 
+  // ===== Admin — Abonnements ===============================================
+  '/admin/subscriptions': {
+    get: {
+      tags: ['Admin · Abonnements'],
+      summary: "Périodes d'abonnement (200 plus récentes)",
+      security: bearer,
+      parameters: [
+        { name: 'accountId', in: 'query', schema: { type: 'string' } },
+        { name: 'active', in: 'query', schema: { type: 'string', enum: ['true'] }, description: 'true = seulement les périodes en cours.' },
+      ],
+      responses: { 200: { description: 'Liste des Subscription avec plan et compte.' } },
+    },
+  },
+  '/admin/subscriptions/plans': {
+    get: {
+      tags: ['Admin · Abonnements'],
+      summary: 'Formules (actives et inactives)',
+      security: bearer,
+      responses: { 200: okList({ $ref: '#/components/schemas/Plan' }) },
+    },
+  },
+  '/admin/subscriptions/plans/{code}': {
+    put: {
+      tags: ['Admin · Abonnements'],
+      summary: "Modifier le libellé, le prix ou l'activation d'une formule",
+      description: "N'affecte que les paiements futurs.",
+      security: bearer,
+      parameters: [{ name: 'code', in: 'path', required: true, schema: { type: 'string', enum: ['DAY', 'MONTH'] } }],
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: { label: { type: 'string' }, priceGnf: { type: 'integer' }, isActive: { type: 'boolean' } },
+            },
+          },
+        },
+      },
+      responses: { 200: ok({ $ref: '#/components/schemas/Plan' }), 400: responses.BadRequest, 404: responses.NotFound },
+    },
+  },
+  '/admin/subscriptions/payments': {
+    get: {
+      tags: ['Admin · Abonnements'],
+      summary: 'Paiements (200 plus récents)',
+      security: bearer,
+      parameters: [
+        { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'EXPIRED'] } },
+        { name: 'accountId', in: 'query', schema: { type: 'string' } },
+      ],
+      responses: { 200: { description: 'Liste des Payment (tous les champs, dont transactionId, fees, receivedAmount) avec plan, période et compte.' } },
+    },
+  },
+  '/admin/subscriptions/payments/{id}/reconcile': {
+    post: {
+      tags: ['Admin · Abonnements'],
+      summary: 'Revérifier un paiement auprès de Djomy',
+      description: "Pour un client qui affirme avoir payé : relit le statut chez Djomy et active l'abonnement si le paiement a réussi.",
+      security: bearer,
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: { 200: { description: 'outcome (granted, already_processed, pending, expired…) + paiement à jour.' }, 404: responses.NotFound },
+    },
+  },
+
   // ===== Admin — Messagerie (SMS personnalisés) ============================
   '/admin/messages': {
     get: {
@@ -1337,6 +1628,8 @@ const openapiSpec = {
     description:
       "API backend de Carbugui — recherche de stations-service en temps réel en Guinée. " +
       "Trois espaces : `/app` (chauffeurs), `/station` (tableau de bord station), `/admin` (back-office). " +
+      "Produits suivis : ESSENCE, GASOIL, GAZ, LUBRIFIANT. La consultation des stations est réservée aux chauffeurs " +
+      "abonnés (24 h ou 1 mois, paiement Djomy) — réponse 402 `SUBSCRIPTION_REQUIRED` sinon. " +
       "Un canal WebSocket (même port que le serveur HTTP) diffuse les messages de chat en temps réel : " +
       "envoyer `{ threadId, accountId }` pour s'initialiser puis `{ text }` pour envoyer un message.",
     contact: { name: 'Carbugui' },
@@ -1345,6 +1638,7 @@ const openapiSpec = {
   tags: [
     { name: 'App · Auth' },
     { name: 'App · Stations' },
+    { name: 'App · Abonnements', description: 'Abonnement chauffeur 24 h / 1 mois payé via Djomy.' },
     { name: 'App · Chat' },
     { name: 'Station · Auth' },
     { name: 'Station · Dashboard' },
@@ -1355,6 +1649,8 @@ const openapiSpec = {
     { name: 'Admin · Signalements' },
     { name: 'Admin · Chat' },
     { name: 'Admin · Messagerie' },
+    { name: 'Admin · Abonnements' },
+    { name: 'Webhooks' },
   ],
   components: { securitySchemes, schemas, responses },
   paths,
