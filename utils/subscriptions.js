@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const prisma = require('./prisma');
 const djomy = require('./djomy');
+const { sendSubscriptionConfirmation } = require('./sms');
 
 /**
  * Abonnements chauffeurs payés via un lien de paiement Djomy.
@@ -156,6 +157,31 @@ const grantSubscription = async (paymentId, djomyPayment) =>
   });
 
 /**
+ * SMS de confirmation au chauffeur. Un échec d'envoi est seulement journalisé :
+ * l'abonnement est déjà accordé et ne doit pas être remis en cause.
+ */
+const notifySubscriptionGranted = async (payment, subscription) => {
+  try {
+    const [account, plan] = await Promise.all([
+      prisma.account.findUnique({ where: { id: payment.accountId }, select: { phoneNumber: true } }),
+      prisma.plan.findUnique({ where: { id: payment.planId }, select: { label: true } }),
+    ]);
+
+    if (!account?.phoneNumber) return;
+
+    await sendSubscriptionConfirmation(account.phoneNumber, {
+      planLabel: plan?.label || '',
+      amountGnf: payment.amountGnf,
+      startsAt: subscription.startsAt,
+      endsAt: subscription.endsAt,
+      merchantReference: payment.merchantReference,
+    });
+  } catch (error) {
+    console.error(`SMS confirmation abonnement ${payment.merchantReference} non envoyé:`, error.message);
+  }
+};
+
+/**
  * Applique un statut de paiement Djomy VÉRIFIÉ (lu via l'API, jamais
  * directement depuis le webhook) au Payment local.
  */
@@ -181,6 +207,13 @@ const applyVerifiedDjomyPayment = async (payment, djomyPayment) => {
     }
 
     const subscription = await grantSubscription(payment.id, djomyPayment);
+
+    // Seul l'appel qui a réellement accordé la période envoie le SMS : un
+    // webhook rejoué ou une revérification n'en renvoie jamais un second.
+    if (subscription) {
+      await notifySubscriptionGranted(payment, subscription);
+    }
+
     return { outcome: subscription ? 'granted' : 'already_processed', subscription };
   }
 

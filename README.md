@@ -73,7 +73,9 @@ Un chauffeur doit avoir un abonnement en cours pour consulter les stations
 2. Djomy appelle `POST /api/v1/webhooks/djomy`. La signature
    `X-Webhook-Signature` est vérifiée et **le statut est toujours relu via
    l'API Djomy** avant d'activer quoi que ce soit (montant, devise et
-   référence contrôlés).
+   référence contrôlés). Le chauffeur reçoit alors un SMS de confirmation
+   (montant, formule, date de fin, référence), envoyé une seule fois par
+   paiement.
 3. Filet de sécurité : toutes les minutes, `reconcilePendingPayments`
    revérifie les paiements restés PENDING (webhook perdu) et expire les
    liens jamais payés.

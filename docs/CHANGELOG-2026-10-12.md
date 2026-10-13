@@ -72,6 +72,7 @@ Les prix sont modifiables par un admin. Afficher toujours ceux que renvoie `GET 
 - Réappuyer sur « Payer » pendant qu'un lien est encore valide renvoie **le même lien** (`reused: true`) : on n'en crée pas un nouveau.
 - Acheter alors qu'un abonnement est actif **prolonge** l'accès : la nouvelle période démarre à la fin de la précédente. `accessUntil` donne la date de fin réelle.
 - Si le chauffeur ferme l'app avant la fin, rien n'est perdu : le serveur confirme le paiement tout seul (webhook Djomy, plus une revérification automatique chaque minute).
+- Dès que le paiement est confirmé, le chauffeur reçoit un **SMS de confirmation**. Il contient le montant, la formule, la date de fin et la référence, par exemple : « Carbugui : paiement de 2 000 GNF reçu, merci ! Abonnement 24 heures actif jusqu'au 14/10/2026 à 09:19. Réf : SUB-… ». L'app n'a rien à faire pour ça.
 
 ### Endpoints chauffeur
 

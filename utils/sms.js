@@ -77,9 +77,33 @@ const sendStationCredentials = async (phoneNumber, stationName, loginCode) => {
   return sendSMS({ to: phoneNumber, message });
 };
 
+// Dates affichées à l'heure de Conakry (UTC+0, sans heure d'été).
+const formatDateTimeFr = (date) => new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Africa/Conakry',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+}).format(date).replace(' ', ' à ');
+
+const formatGnf = (amount) => `${new Intl.NumberFormat('fr-FR').format(amount).replace(/\s/g, ' ')} GNF`;
+
+// Confirmation au chauffeur une fois son paiement d'abonnement validé
+const sendSubscriptionConfirmation = async (phoneNumber, { planLabel, amountGnf, startsAt, endsAt, merchantReference }) => {
+  const startsLater = startsAt > new Date();
+  const message = `Carbugui : paiement de ${formatGnf(amountGnf)} reçu, merci !\n`
+    + `Abonnement ${planLabel} ${startsLater ? `actif du ${formatDateTimeFr(startsAt)} ` : 'actif '}`
+    + `jusqu'au ${formatDateTimeFr(endsAt)}.\n`
+    + `Réf : ${merchantReference}`;
+
+  return sendSMS({ to: phoneNumber, message });
+};
+
 module.exports = {
   sendSMS,
   sendBulkSMS,
   sendOtpCode,
   sendStationCredentials,
+  sendSubscriptionConfirmation,
 };
