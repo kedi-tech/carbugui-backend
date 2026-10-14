@@ -40,6 +40,9 @@ const errorHandler = (err, req, res, next) => {
 
   res.status(statusCode).json({
     success: false,
+    // `message` comme dans toutes les réponses des contrôleurs ; `error`
+    // conservé pour les clients existants.
+    message,
     error: message,
     ...(isDevelopment && { stack: err.stack }),
     timestamp: new Date().toISOString(),

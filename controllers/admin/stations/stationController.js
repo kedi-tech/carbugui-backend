@@ -1,7 +1,8 @@
 const bcrypt = require('bcryptjs');
 const slugify = require('slugify');
 const prisma = require('../../../utils/prisma');
-const { generateRandomString } = require('../../../utils/functions');
+const { generateRandomString, generatePassword, normalizeGuineaPhone } = require('../../../utils/functions');
+const { claimPhoneNumber, nextLoginCode, nextMembershipRole } = require('../../../utils/stationAccess');
 const { importStationsFromOSM } = require('../../../utils/stationImportService');
 
 // GET /admin/stations
@@ -117,31 +118,119 @@ exports.deleteStation = async (req, res) => {
   return res.status(200).json({ success: true, message: 'Station supprimée avec succès.' });
 };
 
-// POST /admin/stations/:id/accounts — crée l'accès (code + mot de passe) d'une station
+// POST /admin/stations/:id/accounts { fullName, phoneNumber? } — crée un accès
+// nommé pour un agent. Une station peut en avoir plusieurs : loginCode = slug
+// pour le premier, puis slug-2, slug-3… Le mot de passe n'est renvoyé qu'ici.
 exports.createStationAccount = async (req, res) => {
+  const fullName = typeof req.body.fullName === 'string' ? req.body.fullName.trim() : '';
+  const { phoneNumber } = req.body;
+
+  if (fullName.length < 3) {
+    return res.status(400).json({ success: false, message: 'fullName est requis (3 caractères minimum).' });
+  }
+
+  let normalizedPhone = null;
+  if (phoneNumber !== undefined && phoneNumber !== null && phoneNumber !== '') {
+    normalizedPhone = normalizeGuineaPhone(phoneNumber);
+    if (!normalizedPhone) {
+      return res.status(400).json({ success: false, message: 'Numéro invalide : 9 chiffres guinéens, débutant par 6 ou 7.' });
+    }
+  }
+
   const station = await prisma.station.findUnique({ where: { id: req.params.id } });
   if (!station) {
     return res.status(404).json({ success: false, message: 'Station introuvable.' });
   }
 
-  const loginCode = station.slug;
-  const password = generateRandomString(8);
+  const password = generatePassword();
+  const passwordHash = await bcrypt.hash(password, 12);
 
-  const account = await prisma.account.create({
-    data: {
-      role: 'STATION',
-      loginCode,
-      passwordHash: await bcrypt.hash(password, 12),
-      fullName: station.name,
-      memberships: { create: { stationId: station.id, role: 'OWNER' } },
+  // Deux créations simultanées peuvent viser le même loginCode : la seconde
+  // échoue sur l'index unique (P2002) et recalcule le suivant.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const result = await prisma.$transaction(async (tx) => {
+        if (normalizedPhone && !(await claimPhoneNumber(normalizedPhone, tx))) {
+          return { conflict: true };
+        }
+
+        const loginCode = await nextLoginCode(station.slug, tx);
+        const membershipRole = await nextMembershipRole(station.id, tx);
+
+        const account = await tx.account.create({
+          data: {
+            role: 'STATION',
+            status: 'ACTIVE',
+            loginCode,
+            phoneNumber: normalizedPhone,
+            fullName,
+            passwordHash,
+            memberships: { create: { stationId: station.id, role: membershipRole } },
+          },
+        });
+
+        return { account, membershipRole };
+      });
+
+      if (result.conflict) {
+        return res.status(409).json({ success: false, message: 'Ce numéro est déjà utilisé par un autre compte.' });
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: 'Accès station créé. Communiquez ces identifiants une seule fois, ils ne seront plus affichés.',
+        data: {
+          accountId: result.account.id,
+          loginCode: result.account.loginCode,
+          password,
+          fullName: result.account.fullName,
+          phoneNumber: result.account.phoneNumber,
+          membershipRole: result.membershipRole,
+        },
+      });
+    } catch (error) {
+      const target = String(error.meta?.target || '');
+      if (error.code !== 'P2002') throw error;
+      if (target.includes('phoneNumber')) {
+        return res.status(409).json({ success: false, message: 'Ce numéro est déjà utilisé par un autre compte.' });
+      }
+    }
+  }
+
+  return res.status(409).json({ success: false, message: 'Création simultanée en cours pour cette station, réessayez.' });
+};
+
+// GET /admin/stations/:id/accounts?includeDeleted=true — agents de la station
+exports.getStationAccounts = async (req, res) => {
+  const station = await prisma.station.findUnique({ where: { id: req.params.id }, select: { id: true } });
+  if (!station) {
+    return res.status(404).json({ success: false, message: 'Station introuvable.' });
+  }
+
+  const includeDeleted = req.query.includeDeleted === 'true';
+
+  const memberships = await prisma.stationMembership.findMany({
+    where: {
+      stationId: station.id,
+      ...(!includeDeleted && { account: { status: { not: 'DELETED' } } }),
     },
+    include: { account: true },
+    orderBy: { createdAt: 'asc' },
   });
 
-  return res.status(201).json({
-    success: true,
-    message: 'Accès station créé. Communiquez ces identifiants une seule fois, ils ne seront plus affichés.',
-    data: { accountId: account.id, loginCode, password },
-  });
+  const data = memberships.map(({ role, account }) => ({
+    id: account.id,
+    fullName: account.fullName,
+    phoneNumber: account.phoneNumber,
+    loginCode: account.loginCode,
+    status: account.status,
+    membershipRole: role,
+    lastSeenAt: account.lastSeenAt,
+    createdAt: account.createdAt,
+  }));
+
+  return res.status(200).json({ success: true, count: data.length, data });
 };
 
 // POST /admin/stations/import-osm

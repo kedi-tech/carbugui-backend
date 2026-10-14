@@ -12,7 +12,7 @@ dotenv.config();
 const prisma = require('./utils/prisma');
 const { matchIntent } = require('./utils/chatBot');
 const { dispatchDueScheduledMessages } = require('./utils/adminMessaging');
-const { reconcilePendingPayments } = require('./utils/subscriptions');
+const { reconcilePendingPayments, notifyExpiredSubscriptions } = require('./utils/subscriptions');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const openapiSpec = require('./docs/openapi');
 
@@ -74,6 +74,14 @@ app.use('/api/', limiter);
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Page web d'achat du pass (chauffeurs iPhone : l'app iOS ne vend rien) et
+// page de retour après Djomy. Une seule page, qui lit son chemin.
+const passPage = path.join(__dirname, 'public', 'pass', 'index.html');
+app.get(['/pass', '/pass/', '/pass/merci'], (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(passPage);
+});
 
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -218,6 +226,11 @@ setInterval(() => {
 setInterval(() => {
   reconcilePendingPayments().catch((error) => console.error('reconcilePendingPayments error:', error));
 }, 60 * 1000);
+
+// SMS « pass expiré » aux chauffeurs dont la dernière période vient de finir.
+setInterval(() => {
+  notifyExpiredSubscriptions().catch((error) => console.error('notifyExpiredSubscriptions error:', error));
+}, 5 * 60 * 1000);
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');

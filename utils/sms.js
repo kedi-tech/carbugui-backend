@@ -100,10 +100,24 @@ const sendSubscriptionConfirmation = async (phoneNumber, { planLabel, amountGnf,
   return sendSMS({ to: phoneNumber, message });
 };
 
+// Envoyé à un compte créé depuis l'app iPhone : l'app iOS ne vend rien
+// (règles App Store), le pass s'achète sur la page web /pass.
+const sendPassActivationLink = async (phoneNumber, passUrl) =>
+  sendSMS({ to: phoneNumber, message: `Activez votre pass CARBUGUI : ${passUrl}` });
+
+// Fin d'accès (dernière période terminée, aucune autre achetée d'avance)
+const sendPassExpired = async (phoneNumber, passUrl) => {
+  const message = 'CARBUGUI : votre pass a expiré.'
+    + (passUrl ? `\nRenouvelez-le ici : ${passUrl}` : '\nRenouvelez-le depuis l\'application.');
+  return sendSMS({ to: phoneNumber, message });
+};
+
 module.exports = {
   sendSMS,
   sendBulkSMS,
   sendOtpCode,
   sendStationCredentials,
   sendSubscriptionConfirmation,
+  sendPassActivationLink,
+  sendPassExpired,
 };

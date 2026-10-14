@@ -13,6 +13,7 @@ router.get('/:id', stationController.getStationById);
 router.put('/:id', stationController.updateStation);
 router.delete('/:id', stationController.deleteStation);
 router.put('/:id/verify', stationController.verifyStation);
+router.get('/:id/accounts', stationController.getStationAccounts);
 router.post('/:id/accounts', stationController.createStationAccount);
 
 module.exports = router;

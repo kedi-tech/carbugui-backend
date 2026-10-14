@@ -16,8 +16,11 @@ et un back-office admin.
   connexion par code + mot de passe, mise à jour de la disponibilité/prix
   par produit (ESSENCE, GASOIL, GAZ, LUBRIFIANT), ouverture/fermeture,
   historique d'activité.
-- **Admin** : gestion des comptes (validation des inscriptions station), des
-  stations (CRUD + import OpenStreetMap), des marques/zones, supervision des
+- **Admin** : gestion des comptes (validation des inscriptions station,
+  création d'administrateurs), des accès station (plusieurs agents nommés
+  par station, suppression, réinitialisation du mot de passe avec
+  déconnexion immédiate), des stations (CRUD + import OpenStreetMap), des
+  marques/zones, supervision des
   signalements et des conversations, envoi (immédiat ou programmé) de SMS
   personnalisés à une liste de comptes, suivi des abonnements et paiements,
   prix des formules.
@@ -85,6 +88,28 @@ Configuration (`.env`) : `DJOMY_BASE_URL`, `DJOMY_CLIENT_ID`,
 L'URL du webhook `https://<domaine>/api/v1/webhooks/djomy` doit être
 déclarée dans l'espace développeur Djomy. `SUBSCRIPTION_REQUIRED=false`
 désactive l'obligation d'abonnement (utile pendant une transition).
+
+### iPhone : page web `/pass`
+
+Les règles de l'App Store interdisent de vendre le pass dans l'app iOS : le
+chauffeur l'achète sur `https://<PUBLIC_BASE_URL>/pass` (fichier
+`public/pass/index.html`, servi par `server.js`). La page enchaîne la
+connexion par SMS, le choix de la formule et le checkout Djomy, avec les
+endpoints existants. `/pass/merci` est la page de retour après paiement,
+pour le web comme pour Android.
+
+- À la création d'un compte avec `platform: "IOS"`, le chauffeur reçoit le
+  lien `/pass` par SMS.
+- Le bouton « Recevoir mes informations par SMS » de l'app iPhone appelle
+  `POST /app/subscriptions/pass-link`, qui renvoie ce lien au numéro du
+  compte (1 SMS / 2 min et 5 / 24 h par compte, table `pass_link_sms`).
+- Quand la dernière période d'un chauffeur se termine, il reçoit un SMS
+  « pass expiré » (`SUBSCRIPTION_EXPIRY_SMS=false` pour couper).
+- App Review : `REVIEW_PHONE_NUMBER` / `REVIEW_OTP_CODE` (code fixe sans SMS
+  pour ce seul numéro), puis `POST /admin/subscriptions/grant` pour lui
+  offrir un pass actif.
+
+Détails : `docs/CHANGELOG-2026-10-14.md`.
 
 ## 📥 Import des sites Total (Book1.xlsx)
 

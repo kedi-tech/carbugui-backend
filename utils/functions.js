@@ -11,6 +11,18 @@ const generateRandomString = (length) => {
 
 const generateOtpCode = () => crypto.randomInt(100000, 999999).toString();
 
+// Mot de passe d'agent station, dicté au téléphone : lettres et chiffres
+// sans les caractères ambigus (0/O, 1/l/I), au moins une lettre et un chiffre.
+const PASSWORD_ALPHABET = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+const generatePassword = (length = 8) => {
+  let password = '';
+  while (!/\d/.test(password) || !/[a-zA-Z]/.test(password)) {
+    password = Array.from({ length }, () => PASSWORD_ALPHABET[crypto.randomInt(PASSWORD_ALPHABET.length)]).join('');
+  }
+  return password;
+};
+
 // Mirrors the client's normalizeGuineaPhone: strips everything but digits,
 // drops a leading 224/00224 country code, and only accepts a 9-digit number
 // starting with 6 or 7. Returns null instead of throwing so callers can turn
@@ -36,5 +48,6 @@ const normalizeGuineaPhone = (raw) => {
 module.exports = {
   generateRandomString,
   generateOtpCode,
+  generatePassword,
   normalizeGuineaPhone,
 };

@@ -1,15 +1,30 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../../../utils/prisma');
 const { generateOtpCode } = require('../../../utils/functions');
-const { sendOtpCode } = require('../../../utils/sms');
+const { sendOtpCode, sendPassActivationLink } = require('../../../utils/sms');
 const { verifyRefreshToken, hashToken } = require('../../../utils/jwt');
 const { createSession } = require('../../../utils/session');
 const { sanitizeAccount } = require('../../../utils/sanitize');
 const { getSubscriptionStatus } = require('../../../utils/subscriptions');
 const { formatStatus } = require('../subscriptions/subscriptionController');
+const { getPassPageUrl } = require('../../../utils/publicUrls');
 
 const PHONE_REGEX = /^\+224[0-9]{8,9}$/;
 const OTP_TTL_MINUTES = 10;
+
+// Compte de test App Review : ce numéro reçoit toujours le même code, sans
+// SMS (le testeur d'Apple n'a pas de téléphone guinéen). Inactif tant que
+// REVIEW_PHONE_NUMBER et REVIEW_OTP_CODE (6 chiffres) ne sont pas définis.
+const getReviewOtpCode = (phoneNumber) => {
+  const reviewPhone = process.env.REVIEW_PHONE_NUMBER;
+  const reviewCode = process.env.REVIEW_OTP_CODE;
+
+  if (!reviewPhone || !/^\d{6}$/.test(reviewCode || '') || phoneNumber !== reviewPhone) {
+    return null;
+  }
+
+  return reviewCode;
+};
 
 // POST /app/auth/otp/request
 exports.requestOtp = async (req, res) => {
@@ -19,7 +34,8 @@ exports.requestOtp = async (req, res) => {
     return res.status(400).json({ success: false, message: 'Numéro invalide. Format attendu : +224XXXXXXXXX.' });
   }
 
-  const code = generateOtpCode();
+  const reviewCode = getReviewOtpCode(phoneNumber);
+  const code = reviewCode || generateOtpCode();
   const codeHash = await bcrypt.hash(code, 10);
 
   await prisma.otpChallenge.create({
@@ -32,7 +48,9 @@ exports.requestOtp = async (req, res) => {
     },
   });
 
-  await sendOtpCode(phoneNumber, code, purpose);
+  if (!reviewCode) {
+    await sendOtpCode(phoneNumber, code, purpose);
+  }
 
   return res.status(200).json({ success: true, message: `Code envoyé au ${phoneNumber}.` });
 };
@@ -77,11 +95,20 @@ exports.verifyOtp = async (req, res) => {
     data: { consumedAt: new Date() },
   });
 
-  const account = await prisma.account.upsert({
-    where: { phoneNumber },
-    update: { lastSeenAt: new Date() },
-    create: { phoneNumber, role: 'DRIVER', fullName: req.body.fullName || null },
-  });
+  const existing = await prisma.account.findUnique({ where: { phoneNumber } });
+
+  const account = existing
+    ? await prisma.account.update({ where: { id: existing.id }, data: { lastSeenAt: new Date() } })
+    : await prisma.account.create({ data: { phoneNumber, role: 'DRIVER', fullName: req.body.fullName || null } });
+
+  // L'app iPhone ne vend rien (règles App Store) : un compte créé depuis iOS
+  // reçoit par SMS le lien de la page web où acheter son pass. Envoi en
+  // arrière-plan, un échec SMS ne doit pas bloquer la connexion.
+  const passUrl = getPassPageUrl();
+  if (!existing && req.body.platform === 'IOS' && passUrl && !getReviewOtpCode(phoneNumber)) {
+    sendPassActivationLink(phoneNumber, passUrl)
+      .catch((error) => console.error('SMS lien pass iOS non envoyé:', error.message));
+  }
 
   if (account.status !== 'ACTIVE') {
     return res.status(403).json({ success: false, message: 'Ce compte est suspendu ou supprimé.' });

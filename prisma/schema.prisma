@@ -180,6 +180,11 @@ model Account {
   pinAttempts    Int       @default(0)
   pinLockedUntil DateTime?
 
+  /// Every access token issued before this instant is refused by the auth
+  /// middleware (password reset, suspension). Needed because access tokens
+  /// are stateless JWTs that would otherwise stay valid until they expire.
+  sessionsRevokedAt DateTime?
+
   lastSeenAt DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -195,6 +200,7 @@ model Account {
   receivedAdminMessages AdminMessageRecipient[] @relation("AdminMessageRecipientAccount")
   subscriptions         Subscription[]
   payments              Payment[]
+  passLinkSms           PassLinkSms[]
 
   @@index([role, status])
   @@index([defaultAreaId])
@@ -585,18 +591,27 @@ model Subscription {
   accountId String
   planId    String
   /// The payment that bought this period — unique, so a replayed webhook
-  /// can never grant the same period twice.
-  paymentId String @unique
+  /// can never grant the same period twice. Null for a pass granted for
+  /// free by an admin (App Review test account, support goodwill).
+  paymentId String? @unique
+
+  /// Set on a free grant: the admin account that granted it, and why.
+  grantedById String?
+  note        String?
 
   startsAt  DateTime
   endsAt    DateTime
-  createdAt DateTime @default(now())
+  /// When the "pass expiré" SMS went out — claimed atomically so the
+  /// poller never sends it twice.
+  expiryNotifiedAt DateTime?
+  createdAt        DateTime  @default(now())
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
   plan    Plan    @relation(fields: [planId], references: [id], onDelete: Restrict)
-  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
   @@index([accountId, endsAt])
+  @@index([endsAt, expiryNotifiedAt])
   @@map("subscriptions")
 }
 
@@ -658,4 +673,18 @@ model WebhookEvent {
   @@index([provider, eventId])
   @@index([receivedAt])
   @@map("webhook_events")
+}
+
+/// One "lien du pass" SMS requested from the iPhone app
+/// (POST /app/subscriptions/pass-link). Rows exist only to enforce the rate
+/// limit: 1 SMS per account every 2 minutes, 5 per day.
+model PassLinkSms {
+  id        String   @id @default(cuid())
+  accountId String
+  createdAt DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@map("pass_link_sms")
 }

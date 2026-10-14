@@ -8,6 +8,7 @@
 const PRODUCT_ENUM = ['ESSENCE', 'GASOIL', 'GAZ', 'LUBRIFIANT'];
 
 const servers = [
+  { url: 'https://carbugui.kedi-tech.com/api/v1', description: 'Production' },
   { url: 'http://localhost:5000/api/v1', description: 'Local' },
 ];
 
@@ -178,8 +179,99 @@ const schemas = {
     type: 'object',
     properties: {
       success: { type: 'boolean', example: false },
-      message: { type: 'string' },
+      message: { type: 'string', description: 'Toujours présent.' },
+      error: { type: 'string', description: 'Doublon de message, présent sur les erreurs génériques (ancien format).' },
     },
+  },
+  StationAccess: {
+    type: 'object',
+    description: "Un agent (compte STATION) rattaché à une station.",
+    properties: {
+      id: { type: 'string' },
+      fullName: { type: 'string', nullable: true, example: 'Mamadou Diallo' },
+      phoneNumber: { type: 'string', nullable: true, example: '+224622111222' },
+      loginCode: { type: 'string', nullable: true, example: 'sonap-517108-2', description: 'null pour un accès supprimé (statut DELETED).' },
+      status: { type: 'string', enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'DELETED'] },
+      membershipRole: { type: 'string', enum: ['OWNER', 'STAFF'] },
+      lastSeenAt: { type: 'string', format: 'date-time', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  AccountSummary: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      fullName: { type: 'string', nullable: true },
+      phoneNumber: { type: 'string', nullable: true },
+    },
+  },
+  AdminPayment: {
+    type: 'object',
+    description: 'Paiement tel que renvoyé au back-office (tous les champs de la table payments). Montants en GNF, entiers.',
+    properties: {
+      id: { type: 'string' },
+      accountId: { type: 'string' },
+      planId: { type: 'string' },
+      amountGnf: { type: 'integer', example: 10000, description: 'Prix de la formule au moment de l\'achat.' },
+      status: { type: 'string', enum: ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'EXPIRED'] },
+      merchantReference: { type: 'string', example: 'SUB-MV6GPB65-6247' },
+      paymentLinkReference: { type: 'string', nullable: true, example: '32f4AS77' },
+      paymentUrl: { type: 'string', nullable: true },
+      linkExpiresAt: { type: 'string', format: 'date-time', nullable: true },
+      transactionId: { type: 'string', nullable: true, example: '55c8dc9c-fbad-4b16-a7a8-95dea9d243cc' },
+      paymentMethod: { type: 'string', nullable: true, example: 'OM', description: 'OM, MOMO, KULU, CARD…' },
+      payerIdentifier: { type: 'string', nullable: true, example: '00224621999616' },
+      paidAmount: { type: 'integer', nullable: true, example: 10000, description: 'Payé par le client (GNF).' },
+      receivedAmount: { type: 'integer', nullable: true, example: 9875, description: 'Reçu après frais Djomy (GNF).' },
+      fees: { type: 'integer', nullable: true, example: 125, description: 'Frais Djomy (GNF).' },
+      providerReference: { type: 'string', nullable: true, example: 'CO261012.1325.B71591' },
+      failureReason: { type: 'string', nullable: true },
+      paidAt: { type: 'string', format: 'date-time', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' },
+      updatedAt: { type: 'string', format: 'date-time' },
+      plan: { $ref: '#/components/schemas/PlanRecord' },
+      subscription: { allOf: [{ $ref: '#/components/schemas/AdminSubscriptionRecord' }], nullable: true, description: 'Période accordée (SUCCEEDED uniquement).' },
+      account: { $ref: '#/components/schemas/AccountSummary' },
+    },
+  },
+  PlanRecord: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', example: 'plan_day' },
+      code: { type: 'string', enum: ['DAY', 'MONTH'] },
+      label: { type: 'string' },
+      priceGnf: { type: 'integer' },
+      durationHours: { type: 'integer' },
+      isActive: { type: 'boolean' },
+      sortOrder: { type: 'integer' },
+    },
+  },
+  AdminSubscriptionRecord: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      accountId: { type: 'string' },
+      planId: { type: 'string' },
+      paymentId: { type: 'string', nullable: true, description: 'null pour un pass offert (POST /admin/subscriptions/grant).' },
+      grantedById: { type: 'string', nullable: true },
+      note: { type: 'string', nullable: true },
+      startsAt: { type: 'string', format: 'date-time' },
+      endsAt: { type: 'string', format: 'date-time' },
+      expiryNotifiedAt: { type: 'string', format: 'date-time', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' },
+    },
+  },
+  AdminSubscription: {
+    allOf: [
+      { $ref: '#/components/schemas/AdminSubscriptionRecord' },
+      {
+        type: 'object',
+        properties: {
+          plan: { $ref: '#/components/schemas/PlanRecord' },
+          account: { $ref: '#/components/schemas/AccountSummary' },
+        },
+      },
+    ],
   },
   Plan: {
     type: 'object',
@@ -410,7 +502,10 @@ const paths = {
     post: {
       tags: ['App · Auth'],
       summary: 'Vérifier le code OTP et se connecter',
-      description: 'Crée le compte DRIVER au premier appel (upsert par numéro), puis ouvre une session.',
+      description:
+        "Crée le compte DRIVER au premier appel, puis ouvre une session. Si le compte est créé avec " +
+        "`platform: 'IOS'`, le serveur envoie au chauffeur un SMS « Activez votre pass CARBUGUI : <domaine>/pass » " +
+        "(l'app iPhone ne vend rien, le pass s'achète sur cette page web). L'app iOS doit donc bien envoyer `platform`.",
       requestBody: {
         required: true,
         content: {
@@ -424,7 +519,11 @@ const paths = {
                 fullName: { type: 'string', description: 'Optionnel, utilisé seulement à la création du compte.' },
                 deviceId: { type: 'string' },
                 deviceName: { type: 'string' },
-                platform: { type: 'string', enum: ['IOS', 'ANDROID', 'WEB'] },
+                platform: {
+                  type: 'string',
+                  enum: ['IOS', 'ANDROID', 'WEB'],
+                  description: "À envoyer par l'app : IOS déclenche le SMS du lien /pass à la création du compte.",
+                },
               },
             },
           },
@@ -764,6 +863,25 @@ const paths = {
       },
     },
   },
+  '/app/subscriptions/pass-link': {
+    post: {
+      tags: ['App · Abonnements'],
+      summary: 'Recevoir par SMS le lien de la page /pass',
+      description:
+        "Bouton « Recevoir mes informations par SMS » de l'app iPhone (chauffeur sans pass actif). Pas de corps : le SMS " +
+        "« Activez votre pass CARBUGUI : https://<PUBLIC_BASE_URL>/pass » part toujours au numéro du compte connecté. " +
+        "Limite : 1 SMS par compte toutes les 2 minutes et 5 sur 24 h glissantes. Un envoi échoué (503) ne compte pas.",
+      security: bearer,
+      responses: {
+        200: { description: 'SMS envoyé.', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean', example: true } } } } } },
+        400: { description: "Aucun numéro sur le compte.", content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        401: responses.Unauthorized,
+        403: responses.Forbidden,
+        429: { description: "Limite atteinte. Moins de 2 min : « Un SMS vient d'être envoyé. Réessayez dans quelques minutes. » ; 5 sur 24 h : « Vous avez atteint la limite de SMS pour aujourd'hui. Réessayez demain. »", content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        503: { description: "PUBLIC_BASE_URL non configuré, ou fournisseur SMS en panne.", content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      },
+    },
+  },
   '/app/subscriptions/payments': {
     get: {
       tags: ['App · Abonnements'],
@@ -880,7 +998,9 @@ const paths = {
       tags: ['Station · Auth'],
       summary: 'Inscription station (auto-service, en attente de validation admin)',
       description:
-        "Crée un compte STATION avec le statut PENDING pour la station choisie. Le compte peut se connecter et lire son tableau de bord, mais toute écriture (ouverture/fermeture, statut produit) reste bloquée (403) tant qu'un admin ne le passe pas ACTIVE via PUT /admin/accounts/{id}/status.",
+        "Crée un compte STATION avec le statut PENDING pour la station choisie. Le compte peut se connecter et lire son tableau de bord, mais toute écriture (ouverture/fermeture, statut produit) reste bloquée (403) tant qu'un admin ne le passe pas ACTIVE via PUT /admin/accounts/{id}/status. " +
+        "Plusieurs agents peuvent s'inscrire pour la même station : chacun reçoit son loginCode (slug, slug-2, slug-3…) ; le premier agent actif est OWNER, les suivants STAFF. " +
+        "Seule règle d'unicité : une demande (ou un compte) par numéro → 409. Au plus 5 demandes PENDING par station → 429.",
       requestBody: {
         required: true,
         content: {
@@ -923,7 +1043,8 @@ const paths = {
         },
         400: responses.BadRequest,
         404: responses.NotFound,
-        409: responses.Conflict,
+        409: { description: 'Ce numéro est déjà associé à un compte (message explicite).', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        429: { description: '5 demandes déjà en attente pour cette station.', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
       },
     },
   },
@@ -1120,10 +1241,84 @@ const paths = {
         { name: 'role', in: 'query', schema: { type: 'string', enum: ['DRIVER', 'STATION', 'ADMIN'] } },
         { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'DELETED'] } },
       ],
-      responses: { 200: okList({ $ref: '#/components/schemas/Account' }), 403: responses.Forbidden },
+      description: 'Les comptes STATION portent en plus `stations` : leurs rattachements, sans déduction par loginCode.',
+      responses: {
+        200: okList({
+          allOf: [
+            { $ref: '#/components/schemas/Account' },
+            {
+              type: 'object',
+              properties: {
+                stations: {
+                  type: 'array',
+                  description: 'Comptes STATION uniquement.',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      name: { type: 'string' },
+                      slug: { type: 'string' },
+                      membershipRole: { type: 'string', enum: ['OWNER', 'STAFF'] },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        }),
+        403: responses.Forbidden,
+      },
+    },
+  },
+  '/admin/accounts/admins': {
+    post: {
+      tags: ['Admin · Comptes'],
+      summary: 'Créer un administrateur',
+      description: 'Sans `password`, le serveur en génère un (10 caractères), renvoyé une seule fois dans `data.password`.',
+      security: bearer,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['fullName', 'phoneNumber'],
+              properties: {
+                fullName: { type: 'string', minLength: 3 },
+                phoneNumber: { type: 'string', example: '624000000', description: 'Normalisé en +224XXXXXXXXX ; sert d\'identifiant de connexion.' },
+                password: { type: 'string', minLength: 8, description: 'Facultatif.' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        201: ok({
+          allOf: [
+            { $ref: '#/components/schemas/Account' },
+            { type: 'object', properties: { password: { type: 'string', description: 'Présent seulement si généré par le serveur.' } } },
+          ],
+        }, 'Administrateur créé.'),
+        400: responses.BadRequest,
+        409: responses.Conflict,
+      },
     },
   },
   '/admin/accounts/{id}': {
+    delete: {
+      tags: ['Admin · Comptes'],
+      summary: "Supprimer définitivement un accès station",
+      description:
+        "Comptes STATION uniquement (400 sinon : un chauffeur ou un admin se désactive via PUT …/status). Supprime le compte, ses rattachements " +
+        "et ses sessions ; libère son loginCode et son numéro. Les activités et signalements qu'il a produits restent, avec accountId à null.",
+      security: bearer,
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: {
+        200: { description: '{ success: true, message }' },
+        400: responses.BadRequest,
+        404: responses.NotFound,
+      },
+    },
     get: {
       tags: ['Admin · Comptes'],
       summary: "Détail d'un compte",
@@ -1132,10 +1327,36 @@ const paths = {
       responses: { 200: ok({ $ref: '#/components/schemas/Account' }), 404: responses.NotFound },
     },
   },
+  '/admin/accounts/{id}/password': {
+    post: {
+      tags: ['Admin · Comptes'],
+      summary: "Réinitialiser le mot de passe d'un agent station",
+      description:
+        "Comptes STATION uniquement. Génère un nouveau mot de passe (8 caractères, lettres et chiffres sans 0/O/1/l/I), " +
+        "le renvoie une seule fois et déconnecte immédiatement l'agent partout (ses tokens en cours sont refusés).",
+      security: bearer,
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+      responses: {
+        200: ok({
+          type: 'object',
+          properties: {
+            accountId: { type: 'string' },
+            loginCode: { type: 'string', example: 'sonap-517108-2' },
+            password: { type: 'string', example: 'R4tq8NwZ' },
+          },
+        }),
+        400: responses.BadRequest,
+        404: responses.NotFound,
+      },
+    },
+  },
   '/admin/accounts/{id}/status': {
     put: {
       tags: ['Admin · Comptes'],
-      summary: 'Suspendre / réactiver / supprimer un compte',
+      summary: 'Suspendre / réactiver / supprimer (logiquement) un compte',
+      description:
+        "SUSPENDED ou DELETED déconnecte immédiatement le compte. Pour un compte STATION, DELETED libère aussi son loginCode et son numéro " +
+        "(ils deviennent null) ; pour supprimer réellement un accès station, préférer DELETE /admin/accounts/{id}.",
       security: bearer,
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
       requestBody: {
@@ -1249,12 +1470,40 @@ const paths = {
     },
   },
   '/admin/stations/{id}/accounts': {
+    get: {
+      tags: ['Admin · Stations'],
+      summary: "Lister les accès (agents) d'une station",
+      security: bearer,
+      parameters: [
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'includeDeleted', in: 'query', schema: { type: 'string', enum: ['true'] }, description: 'Inclure les comptes DELETED.' },
+      ],
+      responses: { 200: okList({ $ref: '#/components/schemas/StationAccess' }), 404: responses.NotFound },
+    },
     post: {
       tags: ['Admin · Stations'],
-      summary: "Créer l'accès (code + mot de passe) d'une station",
-      description: 'Le mot de passe en clair est retourné une seule fois — à transmettre à la station puis à ne plus jamais réafficher.',
+      summary: 'Créer un accès nommé pour un agent de la station',
+      description:
+        "Chaque appel crée un nouveau compte STATION ACTIVE. loginCode : le slug de la station pour le premier compte, puis slug-2, slug-3… " +
+        "(un code libéré par une suppression est réutilisé). membershipRole : OWNER si la station n'a aucun autre agent actif, sinon STAFF. " +
+        "Le mot de passe (8 caractères, généré par le serveur) n'est renvoyé qu'ici.",
       security: bearer,
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['fullName'],
+              properties: {
+                fullName: { type: 'string', minLength: 3, example: 'Mamadou Diallo' },
+                phoneNumber: { type: 'string', example: '622111222', description: 'Facultatif. Normalisé en +224XXXXXXXXX.' },
+              },
+            },
+          },
+        },
+      },
       responses: {
         201: {
           description: 'Accès créé.',
@@ -1267,14 +1516,23 @@ const paths = {
                   message: { type: 'string' },
                   data: {
                     type: 'object',
-                    properties: { accountId: { type: 'string' }, loginCode: { type: 'string' }, password: { type: 'string' } },
+                    properties: {
+                      accountId: { type: 'string' },
+                      loginCode: { type: 'string', example: 'sonap-517108-2' },
+                      password: { type: 'string', example: 'x7Kp9mQa' },
+                      fullName: { type: 'string' },
+                      phoneNumber: { type: 'string', nullable: true },
+                      membershipRole: { type: 'string', enum: ['OWNER', 'STAFF'] },
+                    },
                   },
                 },
               },
             },
           },
         },
+        400: responses.BadRequest,
         404: responses.NotFound,
+        409: { description: 'Numéro déjà utilisé par un compte non supprimé (message explicite).', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
       },
     },
   },
@@ -1465,7 +1723,70 @@ const paths = {
         { name: 'accountId', in: 'query', schema: { type: 'string' } },
         { name: 'active', in: 'query', schema: { type: 'string', enum: ['true'] }, description: 'true = seulement les périodes en cours.' },
       ],
-      responses: { 200: { description: 'Liste des Subscription avec plan et compte.' } },
+      responses: { 200: okList({ $ref: '#/components/schemas/AdminSubscription' }) },
+    },
+  },
+  '/admin/subscriptions/grant': {
+    post: {
+      tags: ['Admin · Abonnements'],
+      summary: 'Offrir un pass (sans paiement)',
+      description:
+        "Pour le compte de test App Review (le testeur d'Apple doit trouver un pass actif) ou un geste commercial. " +
+        "Avec un `phoneNumber` inconnu, le compte DRIVER est créé. Le pass s'enchaîne après la période en cours. " +
+        "La période créée a `paymentId: null`, `grantedById` (l'admin) et `note`.",
+      security: bearer,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                accountId: { type: 'string', description: 'accountId OU phoneNumber.' },
+                phoneNumber: { type: 'string', example: '+224600000001' },
+                planCode: { type: 'string', enum: ['DAY', 'MONTH'], default: 'MONTH' },
+                durationDays: { type: 'integer', minimum: 1, maximum: 366, description: 'Remplace la durée de la formule.' },
+                note: { type: 'string', example: 'Compte de test App Review' },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        201: {
+          description: 'Période créée.',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  data: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      accountId: { type: 'string' },
+                      planId: { type: 'string' },
+                      paymentId: { type: 'string', nullable: true, example: null },
+                      grantedById: { type: 'string', nullable: true },
+                      note: { type: 'string', nullable: true },
+                      startsAt: { type: 'string', format: 'date-time' },
+                      endsAt: { type: 'string', format: 'date-time' },
+                      plan: { $ref: '#/components/schemas/Plan' },
+                      account: {
+                        type: 'object',
+                        properties: { id: { type: 'string' }, fullName: { type: 'string', nullable: true }, phoneNumber: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        400: responses.BadRequest,
+        404: responses.NotFound,
+      },
     },
   },
   '/admin/subscriptions/plans': {
@@ -1505,7 +1826,7 @@ const paths = {
         { name: 'status', in: 'query', schema: { type: 'string', enum: ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'EXPIRED'] } },
         { name: 'accountId', in: 'query', schema: { type: 'string' } },
       ],
-      responses: { 200: { description: 'Liste des Payment (tous les champs, dont transactionId, fees, receivedAmount) avec plan, période et compte.' } },
+      responses: { 200: okList({ $ref: '#/components/schemas/AdminPayment' }) },
     },
   },
   '/admin/subscriptions/payments/{id}/reconcile': {
@@ -1515,7 +1836,32 @@ const paths = {
       description: "Pour un client qui affirme avoir payé : relit le statut chez Djomy et active l'abonnement si le paiement a réussi.",
       security: bearer,
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-      responses: { 200: { description: 'outcome (granted, already_processed, pending, expired…) + paiement à jour.' }, 404: responses.NotFound },
+      responses: {
+        200: {
+          description: '`outcome` est à la racine de la réponse, le paiement à jour dans `data`.',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  outcome: {
+                    type: 'string',
+                    enum: ['granted', 'already_processed', 'pending', 'expired', 'failed', 'canceled', 'amount_mismatch', 'reference_mismatch', 'not_found', 'nothing_to_check'],
+                    description:
+                      'granted : abonnement activé maintenant · already_processed : déjà payé et activé · pending : toujours en attente chez Djomy · ' +
+                      'expired : lien expiré sans paiement · failed / canceled : refusé ou annulé chez Djomy · amount_mismatch : montant ou devise incorrects (FAILED, pas d\'accès) · ' +
+                      'reference_mismatch : la transaction ne correspond pas à ce paiement · not_found : transaction inconnue chez Djomy · ' +
+                      'nothing_to_check : paiement non PENDING sans transaction, rien à revérifier.',
+                  },
+                  data: { $ref: '#/components/schemas/AdminPayment' },
+                },
+              },
+            },
+          },
+        },
+        404: responses.NotFound,
+      },
     },
   },
 
@@ -1630,6 +1976,8 @@ const openapiSpec = {
       "Trois espaces : `/app` (chauffeurs), `/station` (tableau de bord station), `/admin` (back-office). " +
       "Produits suivis : ESSENCE, GASOIL, GAZ, LUBRIFIANT. La consultation des stations est réservée aux chauffeurs " +
       "abonnés (24 h ou 1 mois, paiement Djomy) — réponse 402 `SUBSCRIPTION_REQUIRED` sinon. " +
+      "Sur iPhone l'app ne vend rien : le pass s'achète sur la page web `/pass` (hors API, à la racine du serveur), " +
+      "qui utilise les mêmes endpoints OTP / formules / checkout. " +
       "Un canal WebSocket (même port que le serveur HTTP) diffuse les messages de chat en temps réel : " +
       "envoyer `{ threadId, accountId }` pour s'initialiser puis `{ text }` pour envoyer un message.",
     contact: { name: 'Carbugui' },

@@ -7,11 +7,17 @@ const {
   hashToken,
 } = require('../../../utils/jwt');
 const { sanitizeAccount } = require('../../../utils/sanitize');
+const { claimPhoneNumber, nextLoginCode, nextMembershipRole } = require('../../../utils/stationAccess');
 
 const MIN_PASSWORD_LENGTH = 6;
+// Garde-fou anti-abus : au-delà, un admin doit d'abord traiter les demandes.
+const MAX_PENDING_PER_STATION = 5;
 
-// POST /station/auth/register — un gérant réclame une station du catalogue ;
-// le compte naît PENDING et doit être validé par un admin avant toute écriture.
+// POST /station/auth/register — un agent réclame l'accès à une station du
+// catalogue ; le compte naît PENDING et doit être validé par un admin avant
+// toute écriture. Plusieurs agents peuvent s'inscrire pour la même station
+// (loginCode slug, slug-2…) ; la seule règle d'unicité est le numéro : une
+// demande (ou un compte) par numéro.
 exports.register = async (req, res) => {
   const { stationId, fullName, phoneNumber, password } = req.body;
 
@@ -43,30 +49,46 @@ exports.register = async (req, res) => {
     return res.status(404).json({ success: false, message: 'Station introuvable.' });
   }
 
-  // Le login code d'un compte station est toujours le slug de sa station
-  // (même convention que la création par un admin) : un slug déjà pris veut
-  // dire que la station a déjà un compte, en attente ou actif.
-  const existingAccount = await prisma.account.findUnique({ where: { loginCode: station.slug } });
-  if (existingAccount) {
-    return res.status(409).json({ success: false, message: 'Une demande existe déjà pour cette station.' });
+  const pendingCount = await prisma.stationMembership.count({
+    where: { stationId: station.id, account: { status: 'PENDING' } },
+  });
+  if (pendingCount >= MAX_PENDING_PER_STATION) {
+    return res.status(429).json({
+      success: false,
+      message: 'Trop de demandes en attente pour cette station. Réessayez après leur validation.',
+    });
   }
 
-  const existingPhone = await prisma.account.findUnique({ where: { phoneNumber: normalizedPhone } });
-  if (existingPhone) {
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  let account;
+  try {
+    account = await prisma.$transaction(async (tx) => {
+      if (!(await claimPhoneNumber(normalizedPhone, tx))) return null;
+
+      return tx.account.create({
+        data: {
+          role: 'STATION',
+          status: 'PENDING',
+          loginCode: await nextLoginCode(station.slug, tx),
+          phoneNumber: normalizedPhone,
+          fullName: fullName.trim(),
+          passwordHash,
+          memberships: { create: { stationId: station.id, role: await nextMembershipRole(station.id, tx) } },
+        },
+      });
+    });
+  } catch (error) {
+    // Deux inscriptions simultanées sur le même loginCode : rare, on demande de réessayer.
+    if (error.code === 'P2002') {
+      return res.status(409).json({ success: false, message: 'Inscription simultanée en cours, réessayez.' });
+    }
+    throw error;
+  }
+
+  if (!account) {
     return res.status(409).json({ success: false, message: 'Ce numéro est déjà associé à un compte existant.' });
   }
-
-  const account = await prisma.account.create({
-    data: {
-      role: 'STATION',
-      status: 'PENDING',
-      loginCode: station.slug,
-      phoneNumber: normalizedPhone,
-      fullName: fullName.trim(),
-      passwordHash: await bcrypt.hash(password, 12),
-      memberships: { create: { stationId: station.id, role: 'OWNER' } },
-    },
-  });
 
   return res.status(201).json({
     success: true,

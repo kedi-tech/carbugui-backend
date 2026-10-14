@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const prisma = require('./prisma');
 const djomy = require('./djomy');
-const { sendSubscriptionConfirmation } = require('./sms');
+const { sendSubscriptionConfirmation, sendPassExpired } = require('./sms');
+const { getPassPageUrl } = require('./publicUrls');
 
 /**
  * Abonnements chauffeurs payés via un lien de paiement Djomy.
@@ -226,7 +227,7 @@ const applyVerifiedDjomyPayment = async (payment, djomyPayment) => {
         failureReason: `Statut Djomy : ${status}`,
       },
     });
-    return { outcome: status.toLowerCase() };
+    return { outcome: FAILED_STATUSES.includes(status) ? 'failed' : 'canceled' };
   }
 
   // CREATED / PENDING / REDIRECTED / AUTHORIZED : toujours en cours.
@@ -320,6 +321,80 @@ const reconcilePendingPayments = async () => {
   });
 };
 
+/**
+ * Pass offert par un admin, sans paiement : compte de test App Review (le
+ * testeur d'Apple doit trouver un pass actif), geste commercial. S'enchaîne
+ * après la période en cours comme un achat.
+ */
+const grantFreePass = async ({ accountId, plan, durationHours, grantedById, note }) =>
+  prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const latest = await tx.subscription.findFirst({
+      where: { accountId, endsAt: { gt: now } },
+      orderBy: { endsAt: 'desc' },
+    });
+
+    const startsAt = latest ? latest.endsAt : now;
+    const endsAt = new Date(startsAt.getTime() + (durationHours || plan.durationHours) * 60 * 60 * 1000);
+
+    return tx.subscription.create({
+      data: { accountId, planId: plan.id, startsAt, endsAt, grantedById, note: note || null },
+      include: { plan: true },
+    });
+  });
+
+// Seules les périodes terminées depuis moins de 24 h sont notifiées : un
+// serveur resté arrêté plusieurs jours ne rattrape pas des SMS périmés.
+const EXPIRY_SMS_WINDOW_HOURS = 24;
+
+/**
+ * Tâche périodique (server.js) : SMS « pass expiré » au chauffeur dont la
+ * dernière période vient de se terminer. Pas de SMS si une autre période
+ * (achetée d'avance ou offerte) prend le relais. Désactivable avec
+ * SUBSCRIPTION_EXPIRY_SMS=false.
+ */
+const notifyExpiredSubscriptions = async () => {
+  if (process.env.SUBSCRIPTION_EXPIRY_SMS === 'false') return;
+
+  const now = new Date();
+  const ended = await prisma.subscription.findMany({
+    where: {
+      expiryNotifiedAt: null,
+      endsAt: { lte: now, gt: new Date(now.getTime() - EXPIRY_SMS_WINDOW_HOURS * 60 * 60 * 1000) },
+    },
+    include: { account: { select: { phoneNumber: true, role: true, status: true } } },
+    take: 100,
+  });
+
+  for (const subscription of ended) {
+    // eslint-disable-next-line no-await-in-loop
+    const stillCovered = await prisma.subscription.findFirst({
+      where: { accountId: subscription.accountId, endsAt: { gt: now } },
+      select: { id: true },
+    });
+
+    // Réclamation atomique : une seule instance du poller envoie le SMS.
+    // eslint-disable-next-line no-await-in-loop
+    const claimed = await prisma.subscription.updateMany({
+      where: { id: subscription.id, expiryNotifiedAt: null },
+      data: { expiryNotifiedAt: now },
+    });
+
+    const { account } = subscription;
+    if (claimed.count === 0 || stillCovered || !account?.phoneNumber
+      || account.role !== 'DRIVER' || account.status !== 'ACTIVE') {
+      continue;
+    }
+
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await sendPassExpired(account.phoneNumber, getPassPageUrl());
+    } catch (error) {
+      console.error(`SMS pass expiré ${subscription.id} non envoyé:`, error.message);
+    }
+  }
+};
+
 module.exports = {
   isSubscriptionRequired,
   getSubscriptionStatus,
@@ -327,4 +402,6 @@ module.exports = {
   settleByTransactionId,
   reconcilePayment,
   reconcilePendingPayments,
+  grantFreePass,
+  notifyExpiredSubscriptions,
 };

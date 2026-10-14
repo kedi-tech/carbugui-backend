@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Pass CARBUGUI</title>
+  <!--
+    Page d'achat du pass CARBUGUI (servie sur /pass et /pass/merci par server.js).
+    Sur iPhone, l'app ne vend rien (règles App Store) : le chauffeur achète ici,
+    hors de l'app, puis l'app constate le pass à sa prochaine vérification.
+    N'utilise que l'API existante : OTP, formules, checkout Djomy.
+  -->
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --text: #1d2430;
+      --muted: #5d6675;
+      --border: #dfe3e8;
+      --accent: #e8590c;
+      --accent-text: #ffffff;
+      --ok: #1f8a4c;
+      --ok-bg: #e7f5ec;
+      --err: #b42318;
+      --err-bg: #fdecea;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151a;
+        --card: #1b2028;
+        --text: #eef1f5;
+        --muted: #a3acb9;
+        --border: #2d3440;
+        --accent: #ff7a2e;
+        --accent-text: #12151a;
+        --ok: #57c98a;
+        --ok-bg: #16301f;
+        --err: #ff8a80;
+        --err-bg: #3a1c1a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    main { max-width: 440px; margin: 0 auto; padding: 32px 16px 48px; }
+    .brand { font-weight: 800; letter-spacing: .04em; font-size: 22px; margin: 0 0 4px; }
+    .brand span { color: var(--accent); }
+    .subtitle { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    h2 { font-size: 18px; margin: 0 0 12px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input {
+      width: 100%;
+      font-size: 18px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .hint { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      font: inherit;
+      font-weight: 700;
+      padding: 13px 16px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--accent);
+      color: var(--accent-text);
+      cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: default; }
+    button.link {
+      background: none;
+      color: var(--muted);
+      font-weight: 500;
+      text-decoration: underline;
+      padding: 8px;
+      margin-top: 8px;
+    }
+    .plans { display: grid; gap: 12px; }
+    .plan {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      text-align: left;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .plan:hover:not(:disabled) { border-color: var(--accent); }
+    .plan strong { display: block; font-size: 17px; }
+    .plan small { color: var(--muted); font-weight: 500; }
+    .plan .price { color: var(--accent); font-size: 18px; white-space: nowrap; }
+    .notice { border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
+    .notice.ok { background: var(--ok-bg); color: var(--ok); }
+    .notice.err { background: var(--err-bg); color: var(--err); }
+    .status { margin: 0 0 16px; color: var(--muted); }
+    .status strong { color: var(--text); }
+    .big { font-size: 20px; font-weight: 700; margin: 0 0 8px; }
+    .spinner {
+      width: 28px; height: 28px; margin: 8px auto 16px;
+      border: 3px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    [hidden] { display: none !important; }
+    footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 24px; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="brand">CARBU<span>GUI</span></p>
+  <p class="subtitle">Votre pass pour voir les stations qui ont du carburant.</p>
+
+  <div class="card">
+    <p id="error" class="notice err" role="alert" hidden></p>
+
+    <!-- 1. Numéro -->
+    <form id="step-phone" hidden>
+      <h2>Votre numéro</h2>
+      <label for="phone">Numéro de téléphone</label>
+      <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="6XX XX XX XX" required>
+      <p class="hint">Le numéro de votre compte CARBUGUI. Vous recevrez un code par SMS.</p>
+      <button type="submit">Recevoir le code</button>
+    </form>
+
+    <!-- 2. Code SMS -->
+    <form id="step-code" hidden>
+      <h2>Code reçu par SMS</h2>
+      <label for="code">Code à 6 chiffres</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" required>
+      <p class="hint" id="code-hint"></p>
+      <button type="submit">Valider</button>
+      <button type="button" class="link" id="change-phone">Changer de numéro</button>
+    </form>
+
+    <!-- 3. Choix du pass -->
+    <section id="step-plans" hidden>
+      <p class="status" id="current-pass"></p>
+      <h2>Choisissez votre pass</h2>
+      <div class="plans" id="plans"></div>
+      <p class="hint">Paiement sécurisé par Djomy : Orange Money, MTN MoMo ou carte bancaire.</p>
+    </section>
+
+    <!-- 4. Retour de paiement (/pass/merci) -->
+    <section id="step-result" hidden>
+      <div class="spinner" id="result-spinner" hidden></div>
+      <p class="big" id="result-title"></p>
+      <p id="result-text"></p>
+      <button type="button" id="result-retry" hidden>Choisir un pass</button>
+    </section>
+  </div>
+
+  <footer>CARBUGUI · Paiement opéré par Djomy</footer>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var API = '/api/v1';
+  var store = {
+    get: function (k) { try { return sessionStorage.getItem('carbugui.' + k); } catch (e) { return null; } },
+    set: function (k, v) { try { sessionStorage.setItem('carbugui.' + k, v); } catch (e) { /* navigation privée */ } },
+    del: function (k) { try { sessionStorage.removeItem('carbugui.' + k); } catch (e) { /* navigation privée */ } },
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var steps = ['step-phone', 'step-code', 'step-plans', 'step-result'];
+  var phoneNumber = store.get('phone') || '';
+
+  function show(step) {
+    steps.forEach(function (s) { $(s).hidden = s !== step; });
+    hideError();
+  }
+  function showError(message) { $('error').textContent = message; $('error').hidden = false; }
+  function hideError() { $('error').hidden = true; }
+
+  function formatGnf(n) { return new Intl.NumberFormat('fr-FR').format(n) + ' GNF'; }
+  function formatDate(iso) {
+    return new Intl.DateTimeFormat('fr-FR', {
+      timeZone: 'Africa/Conakry', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    }).format(new Date(iso)).replace(' ', ' à ');
+  }
+  function formatDuration(hours) {
+    if (hours % 720 === 0) return hours === 720 ? '30 jours' : (hours / 24) + ' jours';
+    if (hours % 24 === 0) return hours === 24 ? '24 heures' : (hours / 24) + ' jours';
+    return hours + ' heures';
+  }
+
+  // Même règle que normalizeGuineaPhone côté serveur.
+  function normalizePhone(raw) {
+    var d = String(raw || '').replace(/\D/g, '');
+    if (d.indexOf('00224') === 0) d = d.slice(5);
+    else if (d.indexOf('224') === 0 && d.length > 9) d = d.slice(3);
+    return /^[67]\d{8}$/.test(d) ? '+224' + d : null;
+  }
+
+  function api(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    var token = store.get('token');
+    if (token) headers.Authorization = 'Bearer ' + token;
+    return fetch(API + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (json) {
+          if (res.status === 401 && token) { store.del('token'); }
+          if (!res.ok) {
+            var err = new Error(json.message || json.error || 'Une erreur est survenue. Réessayez.');
+            err.status = res.status;
+            throw err;
+          }
+          return json;
+        });
+      });
+  }
+
+  function busy(form, on) {
+    Array.prototype.forEach.call(form.querySelectorAll('button'), function (b) { b.disabled = on; });
+  }
+
+  // --- 1. Numéro --------------------------------------------------------------
+  $('step-phone').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var normalized = normalizePhone($('phone').value);
+    if (!normalized) { showError('Numéro invalide. Exemple : 622 12 34 56.'); return; }
+    busy(this, true);
+    var form = this;
+    api('POST', '/app/auth/otp/request', { phoneNumber: normalized })
+      .then(function () {
+        phoneNumber = normalized;
+        store.set('phone', normalized);
+        $('code-hint').textContent = 'Envoyé au ' + normalized + '. Il expire dans 10 minutes.';
+        show('step-code');
+        $('code').focus();
+      })
+      .catch(function (err) { showError(err.message); })
+      .then(function () { busy(form, false); });
+  });
+
+  // --- 2. Code SMS --------------------------------------------------------------
+  $('step-code').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var code = $('code').value.trim();
+    if (!/^\d{6}$/.test(code)) { showError('Le code contient 6 chiffres.'); return; }
+    busy(this, true);
+    var form = this;
+    api('POST', '/app/auth/otp/verify', { phoneNumber: phoneNumber, code: code, platform: 'WEB', deviceName: 'Page web /pass' })
+      .then(function (json) {
+        store.set('token', json.accessToken);
+        $('code').value = '';
+        return loadPlans();
+      })
+      .catch(function (err) { showError(err.message); })
+      .then(function () { busy(form, false); });
+  });
+
+  $('change-phone').addEventListener('click', function () {
+    store.del('token');
+    show('step-phone');
+    $('phone').focus();
+  });
+
+  // --- 3. Choix du pass ---------------------------------------------------------
+  function loadPlans() {
+    return Promise.all([api('GET', '/app/subscriptions/plans'), api('GET', '/app/subscriptions/me')])
+      .then(function (results) {
+        var plans = results[0].data || [];
+        var me = results[1].data || {};
+
+        $('current-pass').innerHTML = me.active
+          ? 'Pass actif jusqu’au <strong>' + formatDate(me.accessUntil) + '</strong>. Un nouveau pass prolonge cette date.'
+          : 'Aucun pass actif sur le ' + phoneNumber + '.';
+
+        var list = $('plans');
+        list.innerHTML = '';
+        plans.forEach(function (plan) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'plan';
+          btn.innerHTML = '<span><strong></strong><small></small></span><span class="price"></span>';
+          btn.querySelector('strong').textContent = plan.label;
+          btn.querySelector('small').textContent = 'Accès pendant ' + formatDuration(plan.durationHours);
+          btn.querySelector('.price').textContent = formatGnf(plan.priceGnf);
+          btn.addEventListener('click', function () { checkout(plan.code); });
+          list.appendChild(btn);
+        });
+        show('step-plans');
+      })
+      .catch(function (err) {
+        if (err.status === 401 || err.status === 403) {
+          store.del('token');
+          show('step-phone');
+          showError(err.status === 403
+            ? 'Ce numéro n’est pas un compte chauffeur CARBUGUI.'
+            : 'Session expirée, reconnectez-vous.');
+          return;
+        }
+        showError(err.message);
+      });
+  }
+
+  function checkout(planCode) {
+    Array.prototype.forEach.call($('plans').querySelectorAll('button'), function (b) { b.disabled = true; });
+    api('POST', '/app/subscriptions/checkout', { planCode: planCode })
+      .then(function (json) {
+        var payment = json.data;
+        if (!payment || !payment.paymentUrl) throw new Error('Lien de paiement indisponible. Réessayez.');
+        store.set('paymentId', payment.id);
+        window.location.href = payment.paymentUrl;
+      })
+      .catch(function (err) {
+        Array.prototype.forEach.call($('plans').querySelectorAll('button'), function (b) { b.disabled = false; });
+        showError(err.message);
+      });
+  }
+
+  // --- 4. Retour de paiement (/pass/merci) -----------------------------------------
+  function result(title, text, opts) {
+    opts = opts || {};
+    show('step-result');
+    $('result-title').textContent = title;
+    $('result-text').textContent = text;
+    $('result-spinner').hidden = !opts.waiting;
+    $('result-retry').hidden = !opts.retry;
+  }
+
+  var BACK_TO_APP = 'Retournez dans l’application CARBUGUI.';
+
+  function pollPayment(paymentId, attempt) {
+    api('GET', '/app/subscriptions/payments/' + encodeURIComponent(paymentId))
+      .then(function (json) {
+        var p = json.data;
+        if (p.status === 'SUCCEEDED') {
+          store.del('paymentId');
+          var until = p.subscription ? ' jusqu’au ' + formatDate(p.subscription.endsAt) : '';
+          result('Votre pass est actif.', 'Pass ' + (p.plan ? p.plan.label : '') + until + '. ' + BACK_TO_APP);
+        } else if (p.status === 'PENDING') {
+          if (attempt >= 40) {
+            result('Paiement en cours de confirmation.',
+              'Votre pass sera activé automatiquement dès confirmation, et vous recevrez un SMS. ' + BACK_TO_APP);
+            return;
+          }
+          result('Confirmation du paiement…', 'Ne fermez pas cette page.', { waiting: true });
+          setTimeout(function () { pollPayment(paymentId, attempt + 1); }, 3000);
+        } else {
+          store.del('paymentId');
+          result('Le paiement n’a pas abouti.',
+            p.status === 'EXPIRED' ? 'Le lien de paiement a expiré.' : 'Aucun montant n’a été validé.', { retry: true });
+        }
+      })
+      .catch(function () {
+        result('Paiement reçu ?', 'Votre pass sera activé automatiquement dès confirmation, et vous recevrez un SMS. ' + BACK_TO_APP);
+      });
+  }
+
+  function handleReturn() {
+    var params = new URLSearchParams(window.location.search);
+    var paymentId = store.get('paymentId');
+
+    if (params.get('annule') === '1') {
+      store.del('paymentId');
+      result('Paiement annulé.', 'Aucun montant n’a été débité.', { retry: Boolean(store.get('token')) });
+      return;
+    }
+
+    // Parcours commencé sur cette page : on suit le paiement jusqu'au bout.
+    if (paymentId && store.get('token')) {
+      pollPayment(paymentId, 0);
+      return;
+    }
+
+    // Parcours commencé dans l'app Android : pas de session ici, on se fie
+    // au statut ajouté par Djomy à l'URL et on renvoie vers l'app.
+    var status = (params.get('status') || '').toUpperCase();
+    if (status === 'SUCCESS' || status === 'CAPTURED') {
+      result('Paiement reçu, merci !', 'Votre pass s’active dans un instant. ' + BACK_TO_APP);
+    } else if (status === 'FAILED' || status === 'CANCELLED' || status === 'CANCELED') {
+      result('Le paiement n’a pas abouti.', 'Aucun montant n’a été validé. ' + BACK_TO_APP);
+    } else {
+      result('Paiement enregistré.', 'Votre pass sera activé dès confirmation, et vous recevrez un SMS. ' + BACK_TO_APP);
+    }
+  }
+
+  $('result-retry').addEventListener('click', function () {
+    window.history.replaceState(null, '', '/pass');
+    if (store.get('token')) { loadPlans(); } else { show('step-phone'); }
+  });
+
+  // --- Démarrage ------------------------------------------------------------------
+  if (/\/pass\/merci\/?$/.test(window.location.pathname)) {
+    handleReturn();
+  } else if (store.get('token')) {
+    loadPlans();
+  } else {
+    $('phone').value = phoneNumber ? phoneNumber.replace('+224', '') : '';
+    show('step-phone');
+  }
+})();
+</script>
+</body>
+</html>

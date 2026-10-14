@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
+const { getPassReturnUrl } = require('./publicUrls');
 
 /**
  * Client de l'API partenaire Djomy (https://developers.djomy.africa).
@@ -125,6 +126,9 @@ const request = async (method, path, { data, action } = {}) => {
  * Retourne le PartnerPaymentLinkDto (paymentLinkReference, paymentPageUrl…).
  */
 const createPaymentLink = ({ amount, merchantReference, description, phoneNumber, expiresAt, metadata }) => {
+  const returnUrl = process.env.DJOMY_RETURN_URL || getPassReturnUrl();
+  const cancelUrl = process.env.DJOMY_CANCEL_URL || (returnUrl ? `${returnUrl}?annule=1` : null);
+
   const body = {
     amountToPay: amount,
     linkName: merchantReference,
@@ -137,9 +141,11 @@ const createPaymentLink = ({ amount, merchantReference, description, phoneNumber
     metadata,
     ...(phoneNumber && { phoneNumber }),
     ...(process.env.DJOMY_SEND_SMS === 'true' && phoneNumber && { sendSms: true }),
-    // Djomy refuse (400) une URL de retour qui n'est pas en https.
-    ...(process.env.DJOMY_RETURN_URL && { returnUrl: process.env.DJOMY_RETURN_URL }),
-    ...(process.env.DJOMY_CANCEL_URL && { cancelUrl: process.env.DJOMY_CANCEL_URL }),
+    // Djomy refuse (400) une URL de retour qui n'est pas en https. Par défaut
+    // le payeur revient sur /pass/merci (« Retournez dans l'application »),
+    // qu'il ait commencé depuis la page web ou depuis l'app Android.
+    ...(returnUrl && { returnUrl }),
+    ...(cancelUrl && { cancelUrl }),
   };
 
   return request('post', '/v1/links', { data: body, action: 'création du lien de paiement' });

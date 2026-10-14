@@ -1,6 +1,14 @@
 const prisma = require('../utils/prisma');
 const { verifyAccessToken } = require('../utils/jwt');
 
+// Un JWT d'accès émis avant Account.sessionsRevokedAt (mot de passe
+// réinitialisé, compte suspendu…) est refusé, même s'il n'a pas expiré.
+// iat est en secondes : un token émis dans la même seconde que la
+// révocation reste accepté (c'est celui de la reconnexion qui la suit).
+const isTokenRevoked = (account, decoded) =>
+  Boolean(account.sessionsRevokedAt && decoded.iat
+    && decoded.iat < Math.floor(account.sessionsRevokedAt.getTime() / 1000));
+
 /**
  * Vérifie le JWT d'accès et charge le compte (Account) associé. Le rôle
  * (DRIVER / STATION / ADMIN) est déjà dans le token mais on relit le compte
@@ -24,6 +32,10 @@ const auth = async (req, res, next) => {
 
     if (!account) {
       return res.status(401).json({ success: false, message: 'Compte introuvable.' });
+    }
+
+    if (isTokenRevoked(account, decoded)) {
+      return res.status(401).json({ success: false, message: 'Session révoquée. Veuillez vous reconnecter.' });
     }
 
     // PENDING is a valid, authenticated state for a self-registered station
@@ -65,7 +77,7 @@ const optionalAuth = async (req, res, next) => {
 
     const account = await prisma.account.findUnique({ where: { id: decoded.accountId } });
 
-    if (account && account.status !== 'SUSPENDED' && account.status !== 'DELETED') {
+    if (account && account.status !== 'SUSPENDED' && account.status !== 'DELETED' && !isTokenRevoked(account, decoded)) {
       req.auth = { accountId: account.id, role: account.role };
       req.account = account;
     }

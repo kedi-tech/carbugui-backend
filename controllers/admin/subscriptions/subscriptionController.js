@@ -1,5 +1,6 @@
 const prisma = require('../../../utils/prisma');
-const { reconcilePayment, settleByTransactionId } = require('../../../utils/subscriptions');
+const { grantFreePass, reconcilePayment, settleByTransactionId } = require('../../../utils/subscriptions');
+const { normalizeGuineaPhone } = require('../../../utils/functions');
 
 const PAYMENT_STATUSES = ['PENDING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'EXPIRED'];
 const accountSelect = { select: { id: true, fullName: true, phoneNumber: true } };
@@ -69,6 +70,59 @@ exports.getPayments = async (req, res) => {
   });
 
   return res.status(200).json({ success: true, count: payments.length, data: payments });
+};
+
+// POST /admin/subscriptions/grant — pass offert, sans paiement. Sert surtout
+// au compte de test App Review ; avec un phoneNumber inconnu, le compte
+// DRIVER est créé (le testeur se connectera ensuite avec ce numéro).
+exports.grantPass = async (req, res) => {
+  const { accountId, phoneNumber, planCode = 'MONTH', durationDays, note } = req.body;
+
+  if (!accountId && !phoneNumber) {
+    return res.status(400).json({ success: false, message: 'accountId ou phoneNumber est requis.' });
+  }
+
+  if (durationDays !== undefined && (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 366)) {
+    return res.status(400).json({ success: false, message: 'durationDays doit être un entier entre 1 et 366.' });
+  }
+
+  const plan = await prisma.plan.findUnique({ where: { code: String(planCode).toUpperCase() } });
+  if (!plan) {
+    return res.status(404).json({ success: false, message: 'Formule introuvable.' });
+  }
+
+  let account;
+  if (accountId) {
+    account = await prisma.account.findUnique({ where: { id: accountId } });
+  } else {
+    const normalized = normalizeGuineaPhone(phoneNumber);
+    if (!normalized) {
+      return res.status(400).json({ success: false, message: 'Numéro invalide. Format attendu : +224XXXXXXXXX.' });
+    }
+    account = await prisma.account.findUnique({ where: { phoneNumber: normalized } })
+      || await prisma.account.create({ data: { phoneNumber: normalized, role: 'DRIVER' } });
+  }
+
+  if (!account) {
+    return res.status(404).json({ success: false, message: 'Compte introuvable.' });
+  }
+
+  if (account.role !== 'DRIVER') {
+    return res.status(400).json({ success: false, message: 'Seul un compte chauffeur (DRIVER) peut recevoir un pass.' });
+  }
+
+  const subscription = await grantFreePass({
+    accountId: account.id,
+    plan,
+    durationHours: durationDays ? durationDays * 24 : undefined,
+    grantedById: req.auth.accountId,
+    note: note ? String(note).slice(0, 190) : null,
+  });
+
+  return res.status(201).json({
+    success: true,
+    data: { ...subscription, account: { id: account.id, fullName: account.fullName, phoneNumber: account.phoneNumber } },
+  });
 };
 
 // POST /admin/subscriptions/payments/:id/reconcile — revérifie chez Djomy

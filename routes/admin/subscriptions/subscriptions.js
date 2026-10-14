@@ -7,6 +7,7 @@ const router = createAsyncRouter();
 router.use(auth, requireRole('ADMIN'));
 
 router.get('/', subscriptionController.getSubscriptions);
+router.post('/grant', subscriptionController.grantPass);
 router.get('/plans', subscriptionController.getPlans);
 router.put('/plans/:code', subscriptionController.updatePlan);
 router.get('/payments', subscriptionController.getPayments);

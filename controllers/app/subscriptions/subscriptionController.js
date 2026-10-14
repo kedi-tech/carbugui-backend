@@ -5,6 +5,8 @@ const {
   reconcilePayment,
   startCheckout,
 } = require('../../../utils/subscriptions');
+const { getPassPageUrl } = require('../../../utils/publicUrls');
+const { sendPassActivationLink } = require('../../../utils/sms');
 
 // Un lien encore valide au moins 2 min est réutilisé au lieu d'en générer un
 // nouveau à chaque tap sur "Payer".
@@ -97,6 +99,56 @@ exports.checkout = async (req, res) => {
   const payment = await startCheckout({ account: req.account, plan });
 
   return res.status(201).json({ success: true, reused: false, data: publicPayment(payment) });
+};
+
+const PASS_LINK_MIN_INTERVAL_MS = 2 * 60 * 1000;
+const PASS_LINK_DAILY_MAX = 5;
+
+// POST /app/subscriptions/pass-link — bouton « Recevoir mes informations par
+// SMS » de l'app iPhone : envoie le lien de la page /pass au numéro du compte
+// connecté (jamais à un numéro choisi par l'app). Limité à 1 SMS toutes les
+// 2 minutes et 5 sur 24 h glissantes par compte.
+exports.sendPassLink = async (req, res) => {
+  const passUrl = getPassPageUrl();
+  if (!passUrl) {
+    return res.status(503).json({ success: false, message: 'Service momentanément indisponible. Réessayez plus tard.' });
+  }
+
+  const { phoneNumber } = req.account;
+  if (!phoneNumber) {
+    return res.status(400).json({ success: false, message: 'Aucun numéro de téléphone sur ce compte.' });
+  }
+
+  // Le créneau est réservé AVANT l'envoi puis compté : deux appels
+  // simultanés ne peuvent pas passer tous les deux entre les gouttes.
+  const now = Date.now();
+  const slot = await prisma.passLinkSms.create({ data: { accountId: req.auth.accountId } });
+
+  const [recent, today] = await Promise.all([
+    prisma.passLinkSms.count({ where: { accountId: req.auth.accountId, createdAt: { gt: new Date(now - PASS_LINK_MIN_INTERVAL_MS) } } }),
+    prisma.passLinkSms.count({ where: { accountId: req.auth.accountId, createdAt: { gt: new Date(now - 24 * 60 * 60 * 1000) } } }),
+  ]);
+
+  if (recent > 1 || today > PASS_LINK_DAILY_MAX) {
+    await prisma.passLinkSms.delete({ where: { id: slot.id } });
+    return res.status(429).json({
+      success: false,
+      message: recent > 1
+        ? 'Un SMS vient d\'être envoyé. Réessayez dans quelques minutes.'
+        : 'Vous avez atteint la limite de SMS pour aujourd\'hui. Réessayez demain.',
+    });
+  }
+
+  try {
+    await sendPassActivationLink(phoneNumber, passUrl);
+  } catch (error) {
+    // Pas de SMS parti : le créneau est rendu pour que le chauffeur puisse réessayer.
+    await prisma.passLinkSms.delete({ where: { id: slot.id } });
+    console.error('SMS lien pass (pass-link) non envoyé:', error.message);
+    return res.status(503).json({ success: false, message: 'L\'envoi du SMS a échoué. Réessayez dans quelques minutes.' });
+  }
+
+  return res.status(200).json({ success: true });
 };
 
 // GET /app/subscriptions/payments

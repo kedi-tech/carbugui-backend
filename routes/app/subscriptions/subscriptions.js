@@ -8,6 +8,7 @@ router.get('/plans', subscriptionController.getPlans);
 
 router.get('/me', auth, requireRole('DRIVER'), subscriptionController.getMySubscription);
 router.post('/checkout', auth, requireRole('DRIVER'), subscriptionController.checkout);
+router.post('/pass-link', auth, requireRole('DRIVER'), subscriptionController.sendPassLink);
 router.get('/payments', auth, requireRole('DRIVER'), subscriptionController.getMyPayments);
 router.get('/payments/:id', auth, requireRole('DRIVER'), subscriptionController.getMyPayment);
 
